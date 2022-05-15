@@ -43,6 +43,7 @@ contract ERC20R is IERC20R, IERC20Metadata, ChainLinkClient {
     mapping(hash => Debt[]) private _claimToDebts;
 
     uint256 private _totalSupply;
+    uint256 private _stakeConstant; // todo: change to percentage
     address private _governanceContract;
 
     string private _name;
@@ -216,6 +217,24 @@ contract ERC20R is IERC20R, IERC20Metadata, ChainLinkClient {
         public
         recordChainlinkFulfillment(_requestId)
     {}
+
+    
+
+
+    function request(uint256[] memory values,
+                     string memory description) {
+        // victim calls request to freeze, if freeze and revert are both approved
+        // governance contract calls revert.
+        // have to assume the governance contract contains these functions
+        _stake();
+        bytes4(keccak256(“propose(address[], uint256[], bytes[], string)”))
+        _governanceContract.propose([], values, [], description);
+    }
+
+    function _stake() {
+        transfer(_governanceContract, _stakeConstant);
+    }
+
 
     /**
      * @dev See {IERC20-allowance}.
