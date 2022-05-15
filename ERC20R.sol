@@ -5,6 +5,7 @@ pragma solidity ^0.8.0;
 
 import "./util/IERC20R.sol";
 import "./util/IERC20Metadata.sol";
+import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 
 /**
  * @dev Implementation of the {IERC20} interface.
@@ -31,17 +32,32 @@ import "./util/IERC20Metadata.sol";
  * functions have been added to mitigate the well-known issues around setting
  * allowances. See {IERC20-approve}.
  */
-contract ERC20R is IERC20R, IERC20Metadata {
+contract ERC20R is IERC20R, IERC20Metadata, ChainLinkClient {
+    using Chainlink for Chainlink.Request;
+
     mapping(address => uint256) private _balances;
     mapping(address => uint256) private _frozen;
 
     mapping(address => mapping(address => uint256)) private _allowances;
+
+    mapping(hash => Debt[]) private _claimToDebts;
 
     uint256 private _totalSupply;
     address private _governanceContract;
 
     string private _name;
     string private _symbol;
+
+    struct Debt {
+        address from;
+        address to;
+        uint256 amount;
+        hash tx_va;
+    }
+
+    address private oracle;
+    bytes32 private jobId;
+    uint256 private fee;
 
     modifier GovernanceOnly() {
         require(msg.sender == _governanceContract);
@@ -65,6 +81,10 @@ contract ERC20R is IERC20R, IERC20Metadata {
         _name = name_;
         _symbol = symbol_;
         _governanceContract = governanceContract_;
+        setPublicChainlinkToken();
+        oracle = 0xc57B33452b4F7BB189bB5AfaE9cc4aBa1f7a4FD8; //example
+        jobId = "d5270d1c311941d0b08bead21fea7747"; //example
+        fee = 0.1 * 10**18; // (Varies by network and job)
     }
 
     /**
@@ -138,7 +158,64 @@ contract ERC20R is IERC20R, IERC20Metadata {
         return true;
     }
 
-    function freeze() {}
+    function freeze(hash tx_va) governanceOnly {
+        Debt original = getTransaction(tx_va);
+        uint256 balance = _balances[original.from];
+        if (original.amount < balance) {
+            _frozen[original.from] += original.amount;
+            _claimToDebts[tx_va].append(original);
+        } else {
+            _frozen[original.from] += balance;
+            _claimToDebts[tx_va].append(balance);
+            Debt[] following = getFollowingTransactions(tx_va);
+            for (uint256 i = 0; i < following.length; i++) {
+                Debt debt = following[i];
+                freeze(original.tx_va);
+            }
+        }
+    }
+
+    function revert(hash tx_va0) governanceOnly {
+        //go through all of _claimToDebts[tx_va0] and transfer
+    }
+
+    //put in a separate file
+
+    function requestTransactions(address from, uint256 startingBlock)
+        public
+        returns (bytes32 requestId)
+    {
+        Chainlink.Request memory request = buildChainlinkRequest(
+            jobId,
+            address(this),
+            this.fulfill.selector
+        );
+
+        // Set the URL to perform the GET request on
+        request.add(
+            "get",
+            "https://api.etherscan.io/api?module=account&action=tokentx&contractaddress={this address}&address=" +
+                from +
+                "&page=1&offset=100&startblock=" +
+                startingBlock +
+                "&endblock=27025780&sort=asc&apikey=YourApiKeyToken"
+        );
+
+        // Multiply the result by 1000000000000000000 to remove decimals
+        int256 timesAmount = 10**18;
+        request.addInt("times", timesAmount);
+
+        // Sends the request
+        return sendChainlinkRequestTo(oracle, request, fee);
+    }
+
+    /**
+     * Receive the response in the form of uint256
+     */
+    function fulfillTransactions(bytes32 _requestId, bytes32 response)
+        public
+        recordChainlinkFulfillment(_requestId)
+    {}
 
     /**
      * @dev See {IERC20-allowance}.
