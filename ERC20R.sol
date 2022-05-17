@@ -191,8 +191,15 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         }
     }
 
-    function revert(hash tx_va0) public governanceOnly {
+    function revert(hash tx_va0) governanceOnly returns (bool) {
         //go through all of _claimToDebts[tx_va0] and transfer
+        for (uint256 i = 0; i < _claimToDebts[tx_va0].length; i++){
+            Debt debt = _claimToDebts[tx_va0][i];
+            require(transferFrom(debt.from, debt.to, debt.amount));
+            _frozen[debt.from] -= debt.amount;
+        }
+        delete _claimToDebts[tx_va0];
+        return true;
     }
 
     //put in a separate file
