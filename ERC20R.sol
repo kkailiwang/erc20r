@@ -3,8 +3,9 @@
 
 pragma solidity ^0.8.0;
 
-import "./util/IERC20R.sol";
-import "./util/IERC20Metadata.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import "@openzeppelin/contracts/utils/Context.sol";
 
 /**
  * @dev Implementation of the {IERC20} interface.
@@ -31,7 +32,7 @@ import "./util/IERC20Metadata.sol";
  * functions have been added to mitigate the well-known issues around setting
  * allowances. See {IERC20-approve}.
  */
-contract ERC20R is IERC20R, IERC20Metadata {
+contract ERC20R is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _balances;
     mapping(address => uint256) private _frozen;
     mapping(address => mapping(uint256 => Spenditure[])) private _spenditures;
@@ -41,7 +42,7 @@ contract ERC20R is IERC20R, IERC20Metadata {
 
     mapping(address => mapping(address => uint256)) private _allowances;
 
-    mapping(hash => Debt[]) private _claimToDebts;
+    mapping(bytes32 => Debt[]) private _claimToDebts;
 
     uint256 private _totalSupply;
     uint256 private _stakeConstant; // todo: change to percentage
@@ -60,7 +61,7 @@ contract ERC20R is IERC20R, IERC20Metadata {
         address from;
         address to;
         uint256 amount;
-        hash tx_va;
+        bytes32 tx_va;
     }
 
     address private oracle;
@@ -173,7 +174,7 @@ contract ERC20R is IERC20R, IERC20Metadata {
         return true;
     }
 
-    function freeze(hash tx_va) governanceOnly {
+    function freeze(bytes32 tx_va) public governanceOnly {
         Debt original = getTransaction(tx_va);
         uint256 balance = _balances[original.from];
         if (original.amount < balance) {
@@ -190,7 +191,7 @@ contract ERC20R is IERC20R, IERC20Metadata {
         }
     }
 
-    function revert(hash tx_va0) governanceOnly {
+    function revert(hash tx_va0) public governanceOnly {
         //go through all of _claimToDebts[tx_va0] and transfer
     }
 
