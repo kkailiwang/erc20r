@@ -5,6 +5,7 @@ pragma solidity ^0.8.0;
 
 import "./util/IERC20R.sol";
 import "./util/IERC20Metadata.sol";
+import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 
 /**
  * @dev Implementation of the {IERC20} interface.
@@ -31,13 +32,11 @@ import "./util/IERC20Metadata.sol";
  * functions have been added to mitigate the well-known issues around setting
  * allowances. See {IERC20-approve}.
  */
-contract ERC20R is IERC20R, IERC20Metadata {
+contract ERC20R is IERC20R, IERC20Metadata, ChainLinkClient {
+    using Chainlink for Chainlink.Request;
+
     mapping(address => uint256) private _balances;
     mapping(address => uint256) private _frozen;
-    mapping(address => mapping(uint256 => Spenditure[])) private _spenditures;
-    mapping(address => Queue) private _times_stored;
-
-    uint256 private DELTA = 1000; // could be higher or lower.
 
     mapping(address => mapping(address => uint256)) private _allowances;
 
@@ -49,12 +48,6 @@ contract ERC20R is IERC20R, IERC20Metadata {
 
     string private _name;
     string private _symbol;
-
-    struct Spenditure {
-        address to;
-        uint256 amount;
-        uint256 block_number; //change in other places
-    }
 
     struct Debt {
         address from;
@@ -89,6 +82,10 @@ contract ERC20R is IERC20R, IERC20Metadata {
         _name = name_;
         _symbol = symbol_;
         _governanceContract = governanceContract_;
+        setPublicChainlinkToken();
+        oracle = 0xc57B33452b4F7BB189bB5AfaE9cc4aBa1f7a4FD8; //example
+        jobId = "d5270d1c311941d0b08bead21fea7747"; //example
+        fee = 0.1 * 10**18; // (Varies by network and job)
     }
 
     /**
@@ -158,17 +155,6 @@ contract ERC20R is IERC20R, IERC20Metadata {
         returns (bool)
     {
         address owner = _msgSender();
-        Queue times_stored = _times_stored[owner];
-        if (now > times_stored.last + DELTA) {
-            for (
-                int256 i = times_stored.first;
-                _times_stored[owner].first < now - (14 days);
-                i++
-            ) {
-                delete _spenditures[times_stored[i]][owner];
-            }
-        }
-
         _transfer(owner, to, amount);
         return true;
     }
@@ -195,6 +181,60 @@ contract ERC20R is IERC20R, IERC20Metadata {
     }
 
     //put in a separate file
+
+    function requestTransactions(address from, uint256 startingBlock)
+        public
+        returns (bytes32 requestId)
+    {
+        Chainlink.Request memory request = buildChainlinkRequest(
+            jobId,
+            address(this),
+            this.fulfill.selector
+        );
+
+        // Set the URL to perform the GET request on
+        request.add(
+            "get",
+            "https://api.etherscan.io/api?module=account&action=tokentx&contractaddress={this address}&address=" +
+                from +
+                "&page=1&offset=100&startblock=" +
+                startingBlock +
+                "&endblock=27025780&sort=asc&apikey=YourApiKeyToken"
+        );
+
+        // Multiply the result by 1000000000000000000 to remove decimals
+        int256 timesAmount = 10**18;
+        request.addInt("times", timesAmount);
+
+        // Sends the request
+        return sendChainlinkRequestTo(oracle, request, fee);
+    }
+
+    /**
+     * Receive the response in the form of uint256
+     */
+    function fulfillTransactions(bytes32 _requestId, bytes32 response)
+        public
+        recordChainlinkFulfillment(_requestId)
+    {}
+
+    
+
+
+    function request(uint256[] memory values,
+                     string memory description) {
+        // victim calls request to freeze, if freeze and revert are both approved
+        // governance contract calls revert.
+        // have to assume the governance contract contains these functions
+        _stake();
+        bytes4(keccak256(“propose(address[], uint256[], bytes[], string)”))
+        _governanceContract.propose([], values, [], description);
+    }
+
+    function _stake() {
+        transfer(_governanceContract, _stakeConstant);
+    }
+
 
     /**
      * @dev See {IERC20-allowance}.
@@ -494,24 +534,4 @@ contract ERC20R is IERC20R, IERC20Metadata {
         address to,
         uint256 amount
     ) internal virtual {}
-}
-
-contract Queue {
-    mapping(uint256 => bytes) queue;
-    uint256 first = 1;
-    uint256 last = 0;
-
-    function enqueue(bytes data) public {
-        last += 1;
-        queue[last] = data;
-    }
-
-    function dequeue() public returns (bytes data) {
-        require(last >= first); // non-empty queue
-
-        data = queue[first];
-
-        delete queue[first];
-        first += 1;
-    }
 }
