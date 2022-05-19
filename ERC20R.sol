@@ -153,29 +153,106 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         return true;
     }
 
-    function _freeze_helper(
-        address from,
-        address to,
-        uint256 amount,
-        uint256 blockNumber
-    ) private {}
+    function _getSuspectTxsFromAddress(address from, uint256 startBlock)
+        private
+        returns (Spenditure[] memory suspects, uint256 sum)
+    {
+        uint256 startBlockEra = startBlock / DELTA;
+        uint256 startEraLength = _spenditures[startBlockEra][from].length;
+        uint256 index = find_internal(
+            startBlockEra,
+            from,
+            0,
+            startEraLength,
+            startBlock
+        );
+        sum = 0;
+        uint256 n = startEraLength - index;
+        uint256 lastEra = block.number / DELTA;
 
+        for (uint256 i = startBlockEra + 1; i < lastEra; i++) {
+            n += _spenditures[i][from].length;
+        }
+        suspects = new Spenditure[](n);
+        uint256 counter = 0;
+        for (index; index < startEraLength; index++) {
+            Spenditure memory curr = _spenditures[startBlockEra][from][index];
+            suspects[counter] = Spenditure(
+                curr.from,
+                curr.to,
+                curr.amount,
+                curr.block_number
+            );
+            sum += _spenditures[startBlockEra][from][index].amount;
+            counter++;
+        }
+        for (uint256 i = startBlockEra + 1; i < lastEra; i++) {
+            for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
+                suspects[counter] = _spenditures[i][from][j];
+                sum += _spenditures[i][from][j].amount;
+            }
+            counter++;
+        }
+    }
+
+    function _freeze_helper(Spenditure memory s, bytes32 claimID) private {
+        uint256 advBalance = _balances[s.to];
+        if (s.amount < advBalance) {
+            _frozen[s.to] += s.amount;
+            _claimToDebts[claimID].push(s);
+        } else {
+            _frozen[s.from] += advBalance;
+            _claimToDebts[claimID].push(
+                Spenditure(s.from, s.to, advBalance, s.block_number)
+            );
+            (
+                Spenditure[] memory suspects,
+                uint256 totalAmounts
+            ) = _getSuspectTxsFromAddress(s.to, s.block_number + 1);
+            for (uint256 i = 0; i < suspects.length; i++) {
+                //responsible amount is weighted
+                Spenditure memory s_next = Spenditure(
+                    suspects[i].from,
+                    suspects[i].to,
+                    suspects[i].amount / totalAmounts,
+                    suspects[i].block_number
+                );
+                _freeze_helper(s_next, claimID);
+            }
+        }
+    }
+
+    //binary search
     function find_internal(
-        uint256[] data,
+        uint256 blockEra,
+        address from,
         uint256 begin,
         uint256 end,
         uint256 value
     ) internal returns (uint256 ret) {
         uint256 len = end - begin;
-        if (len == 0 || (len == 1 && data[begin] != value)) {
+        if (
+            len == 0 ||
+            (len == 1 &&
+                _spenditures[blockEra][from][begin].block_number != value)
+        ) {
             return
                 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
         }
         uint256 mid = begin + len / 2;
-        uint256 v = data[mid];
-        if (value < v) return find_internal(data, begin, mid, value);
-        else if (value > v) return find_internal(data, mid + 1, end, value);
-        else return mid;
+        uint256 v = _spenditures[blockEra][from][mid].block_number;
+        if (value < v) return find_internal(blockEra, from, begin, mid, value);
+        else if (value > v)
+            return find_internal(blockEra, from, mid + 1, end, value);
+        else {
+            while (
+                mid - 1 >= 0 &&
+                _spenditures[blockEra][from][mid - 1].block_number == value
+            ) {
+                mid--;
+            }
+            return mid;
+        }
     }
 
     //amount should be in wei
@@ -184,42 +261,69 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address to,
         uint256 amount,
         uint256 blockNumber
-    ) public {
-        require(msg.sender == _governanceContract);
+    ) public returns (bytes32 claimID) {
+        require(
+            msg.sender == _governanceContract,
+            "ERC20R: Unauthorized call."
+        );
+        require(
+            blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
+            "ERC20R: specified transaction is no longer reversible."
+        );
+        require(
+            blockNumber <= block.number,
+            "ERC20R: specified transaction block number is greater than the current block number."
+        );
+
         //verify that this transaction happened
         uint256 blockEra = blockNumber / DELTA;
+        uint256 blockEraLength = _spenditures[blockEra][from].length;
         // do binary search for it
-
-        //hash the spenditure; this is the claim hash now.
-
-        uint256 balance = _balances[original.from];
-        if (original.amount < balance) {
-            _frozen[original.from] += original.amount;
-            _claimToDebts[tx_va].append(original);
-        } else {
-            _frozen[original.from] += balance;
-            _claimToDebts[tx_va].append(balance);
-            Debt[] following = getFollowingTransactions(tx_va);
-            for (uint256 i = 0; i < following.length; i++) {
-                Debt debt = following[i];
-                freeze(original.tx_va);
+        uint256 index = find_internal(
+            blockEra,
+            from,
+            0,
+            blockEraLength,
+            blockNumber
+        );
+        require(
+            index >= 0,
+            "ERC20R: Verification of specified transaction failed."
+        );
+        for (index; index < blockEraLength; index++) {
+            if (
+                _spenditures[blockEra][from][index].to == to &&
+                _spenditures[blockEra][from][index].amount == amount
+            ) {
+                break;
             }
         }
+        require(
+            index < blockEraLength,
+            "ERC20R: Verification of specified transaction failed."
+        );
+
+        //hash the spenditure; this is the claim hash now. what about two identical
+        Spenditure storage s = _spenditures[blockEra][from][index];
+        claimID = keccak256(abi.encode(s));
+        _freeze_helper(s, claimID);
     }
 
-    function reverse(bytes32 tx_va0) public {
-        require(msg.sender == _governanceContract);
+    function reverse(bytes32 claimID) public {
+        require(
+            msg.sender == _governanceContract,
+            "ERC20R: Unauthorized call."
+        );
         //go through all of _claimToDebts[tx_va0] and transfer
-        for (uint256 i = 0; i < _claimToDebts[tx_va0].length; i++) {
-            Debt debt = _claimToDebts[tx_va0][i];
-            require(transferFrom(debt.from, debt.to, debt.amount));
-            _frozen[debt.from] -= debt.amount;
+        for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
+            Spenditure storage s = _claimToDebts[claimID][i];
+            transferFrom(s.to, s.from, s.amount);
+            _frozen[s.from] -= s.amount;
         }
-        delete _claimToDebts[tx_va0];
-        return true;
+        delete _claimToDebts[claimID];
     }
 
-    function clean(address[] addresses, uint256 blockEra) external {
+    function clean(address[] calldata addresses, uint256 blockEra) external {
         require(
             (blockEra + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
             "ERC20-R: Block era is not allowed to be cleared yet."
@@ -530,24 +634,4 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address to,
         uint256 amount
     ) internal virtual {}
-}
-
-contract Queue {
-    mapping(uint256 => bytes) queue;
-    uint256 first = 1;
-    uint256 last = 0;
-
-    function enqueue(bytes data) public {
-        last += 1;
-        queue[last] = data;
-    }
-
-    function dequeue() public returns (bytes data) {
-        require(last >= first); // non-empty queue
-
-        data = queue[first];
-
-        delete queue[first];
-        first += 1;
-    }
 }

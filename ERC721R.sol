@@ -42,7 +42,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     // Mapping from owner to operator approvals
     mapping(address => mapping(address => bool)) private _operatorApprovals;
 
-    bool public frozen;
+    mapping(uint256 => bool) private _frozen;
 
     /**
      * @dev Initializes the contract by setting a `name` and a `symbol` to the token collection.
