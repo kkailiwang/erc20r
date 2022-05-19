@@ -35,14 +35,13 @@ import "@openzeppelin/contracts/utils/Context.sol";
 contract ERC20R is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _balances;
     mapping(address => uint256) private _frozen;
-    mapping(address => mapping(uint256 => Spenditure[])) private _spenditures;
-    mapping(address => Queue) private _times_stored;
+    mapping(uint256 => mapping(address => Spenditure[])) private _spenditures;
+    mapping(bytes32 => Spenditure[]) private _claimToDebts;
 
     uint256 private DELTA = 1000; // could be higher or lower.
+    uint256 private NUM_REVERSIBLE_BLOCKS = 88000;
 
     mapping(address => mapping(address => uint256)) private _allowances;
-
-    mapping(bytes32 => Debt[]) private _claimToDebts;
 
     uint256 private _totalSupply;
     uint256 private _stakeConstant; // todo: change to percentage
@@ -52,26 +51,14 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     string private _symbol;
 
     struct Spenditure {
+        address from;
         address to;
         uint256 amount;
         uint256 block_number; //change in other places
     }
 
-    struct Debt {
-        address from;
-        address to;
-        uint256 amount;
-        bytes32 tx_va;
-    }
-
-    address private oracle;
-    bytes32 private jobId;
-    uint256 private fee;
-
-    modifier GovernanceOnly() {
-        require(msg.sender == _governanceContract);
-        _;
-    }
+    event SavedNewAddressForBlock(address addr, uint256 blockNum);
+    event ClearedDataInTimeblock(address[] addresses, uint256 blockNum);
 
     /**
      * @dev Sets the values for {name} and {symbol}.
@@ -159,23 +146,52 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         returns (bool)
     {
         address owner = _msgSender();
-        Queue times_stored = _times_stored[owner];
-        if (now > times_stored.last + DELTA) {
-            for (
-                int256 i = times_stored.first;
-                _times_stored[owner].first < now - (14 days);
-                i++
-            ) {
-                delete _spenditures[times_stored[i]][owner];
-            }
-        }
-
+        _spenditures[block.number][owner].push(
+            Spenditure(owner, to, amount, block.number)
+        );
         _transfer(owner, to, amount);
         return true;
     }
 
-    function freeze(bytes32 tx_va) public governanceOnly {
-        Debt original = getTransaction(tx_va);
+    function _freeze_helper(
+        address from,
+        address to,
+        uint256 amount,
+        uint256 blockNumber
+    ) private {}
+
+    function find_internal(
+        uint256[] data,
+        uint256 begin,
+        uint256 end,
+        uint256 value
+    ) internal returns (uint256 ret) {
+        uint256 len = end - begin;
+        if (len == 0 || (len == 1 && data[begin] != value)) {
+            return
+                0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+        }
+        uint256 mid = begin + len / 2;
+        uint256 v = data[mid];
+        if (value < v) return find_internal(data, begin, mid, value);
+        else if (value > v) return find_internal(data, mid + 1, end, value);
+        else return mid;
+    }
+
+    //amount should be in wei
+    function freeze(
+        address from,
+        address to,
+        uint256 amount,
+        uint256 blockNumber
+    ) public {
+        require(msg.sender == _governanceContract);
+        //verify that this transaction happened
+        uint256 blockEra = blockNumber / DELTA;
+        // do binary search for it
+
+        //hash the spenditure; this is the claim hash now.
+
         uint256 balance = _balances[original.from];
         if (original.amount < balance) {
             _frozen[original.from] += original.amount;
@@ -191,15 +207,27 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         }
     }
 
-    function revert(hash tx_va0) governanceOnly returns (bool) {
+    function reverse(bytes32 tx_va0) public {
+        require(msg.sender == _governanceContract);
         //go through all of _claimToDebts[tx_va0] and transfer
-        for (uint256 i = 0; i < _claimToDebts[tx_va0].length; i++){
+        for (uint256 i = 0; i < _claimToDebts[tx_va0].length; i++) {
             Debt debt = _claimToDebts[tx_va0][i];
             require(transferFrom(debt.from, debt.to, debt.amount));
             _frozen[debt.from] -= debt.amount;
         }
         delete _claimToDebts[tx_va0];
         return true;
+    }
+
+    function clean(address[] addresses, uint256 blockEra) external {
+        require(
+            (blockEra + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
+            "ERC20-R: Block era is not allowed to be cleared yet."
+        );
+        for (uint256 i = 0; i < addresses.length; i++) {
+            delete _spenditures[blockEra][addresses[i]];
+        }
+        emit ClearedDataInTimeblock(addresses, blockEra);
     }
 
     //put in a separate file
