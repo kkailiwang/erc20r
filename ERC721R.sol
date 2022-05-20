@@ -25,6 +25,9 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     // Token symbol
     string private _symbol;
 
+    uint256 private NUM_REVERSIBLE_BLOCKS = 88000;
+    address private _governanceContract;
+
     struct Owning {
         address owner;
         uint256 startBlock;
@@ -47,9 +50,12 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     /**
      * @dev Initializes the contract by setting a `name` and a `symbol` to the token collection.
      */
-    constructor(string memory name_, string memory symbol_) {
+    constructor(string memory name_,
+                string memory symbol_,
+                address governanceContract_) {
         _name = name_;
         _symbol = symbol_;
+        _governanceContract = governanceContract_;
     }
 
     /**
@@ -95,7 +101,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         override
         returns (address)
     {
-        address owner = _owners[tokenId][_owners[tokenId].length].owner;
+        address owner = _owners[tokenId][_owners[tokenId].length - 1].owner;
         require(
             owner != address(0),
             "ERC721: owner query for nonexistent token"
@@ -146,6 +152,83 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
      */
     function _baseURI() internal view virtual returns (string memory) {
         return "";
+    }
+
+    //binary search
+    function find_internal(
+        uint256 tokenId,
+        uint256 begin,
+        uint256 end,
+        uint256 value
+    ) internal returns (uint256 ret) {
+        uint256 len = end - begin;
+        if (
+            len == 0 ||
+            (len == 1 &&
+                _owners[tokenId][begin].startBlock != value)
+        ) {
+            return
+                0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+        }
+        uint256 mid = begin + len / 2;
+        uint256 v = _owners[tokenId][mid].startBlock;
+        if (value < v) return find_internal(tokenId, begin, mid, value);
+        else if (value > v)
+            return find_internal(tokenId, mid + 1, end, value);
+        else {
+            while (
+                mid - 1 >= 0 &&
+                _owners[tokenId][mid - 1].startBlock == value
+            ) {
+                mid--;
+            }
+            return mid;
+        }
+    }
+
+    /**
+     * @dev freeze
+     */
+    function freeze(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256 blockNumber
+    ) public returns (bool successful) {
+        require(
+            msg.sender == _governanceContract,
+            "ERC721R: Unauthorized call."
+        );
+        require(
+            blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
+            "ERC20R: specified transaction is no longer reversible."
+        );
+        //verify that this transaction happened
+        uint256 blockEraLength = _owners[tokenId].length;
+        uint256 index = find_internal(
+            tokenId,
+            0,
+            blockEraLength,
+            blockNumber
+        );
+        require(
+            index >= 0,
+            "ERC20R: Verification of specified transaction failed."
+        );
+        for (index; index < blockEraLength; index++) {
+            if (
+                _owners[tokenId][index].owner == from &&
+                _owners[tokenId][index+1].owner == to
+            ) {
+                break;
+            }
+        }
+        require(
+            index < blockEraLength,
+            "ERC20R: Verification of specified transaction failed."
+        );
+        _frozen[tokenId] = true;
+        return true;
     }
 
     /**
@@ -418,6 +501,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
             "ERC721: transfer from incorrect owner"
         );
         require(to != address(0), "ERC721: transfer to the zero address");
+        require(_frozen[tokenId] == false, "ERC721R: transfer frozen token");
 
         _beforeTokenTransfer(from, to, tokenId);
 
