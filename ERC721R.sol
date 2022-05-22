@@ -28,13 +28,10 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     uint256 private NUM_REVERSIBLE_BLOCKS = 88000;
     address private _governanceContract;
 
-    struct Owning {
-        address owner;
-        uint256 startBlock;
-    }
+    
 
     // Mapping from token ID to owner address
-    mapping(uint256 => Owning[]) private _owners;
+    mapping(uint256 => OwningQueue) private _owners;
 
     // Mapping owner address to token count
     mapping(address => uint256) private _balances;
@@ -56,6 +53,11 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         _name = name_;
         _symbol = symbol_;
         _governanceContract = governanceContract_;
+    }
+
+    modifier onlyGovernance{
+        require (msg.sender == _governanceContract, "ERC721R: Unauthorized call.");
+        _;
     }
 
     /**
@@ -101,7 +103,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         override
         returns (address)
     {
-        address owner = _owners[tokenId][_owners[tokenId].length - 1].owner;
+        address owner = _owners[tokenId].get([_owners[tokenId].length - 1]).owner;
         require(
             owner != address(0),
             "ERC721: owner query for nonexistent token"
@@ -165,7 +167,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         if (
             len == 0 ||
             (len == 1 &&
-                _owners[tokenId][begin].startBlock != value)
+                _owners[tokenId].get(begin).startBlock != value)
         ) {
             return
                 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
@@ -178,7 +180,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         else {
             while (
                 mid - 1 >= 0 &&
-                _owners[tokenId][mid - 1].startBlock == value
+                _owners[tokenId].get(mid - 1).startBlock == value
             ) {
                 mid--;
             }
@@ -194,17 +196,13 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         address to,
         uint256 tokenId,
         uint256 blockNumber
-    ) public returns (bool successful) {
-        require(
-            msg.sender == _governanceContract,
-            "ERC721R: Unauthorized call."
-        );
+    ) public onlyGovernance returns (bool successful) {
         require(
             blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
             "ERC20R: specified transaction is no longer reversible."
         );
         //verify that this transaction happened
-        uint256 blockEraLength = _owners[tokenId].length;
+        uint256 blockEraLength = _owners[tokenId].length();
         uint256 index = find_internal(
             tokenId,
             0,
@@ -217,8 +215,8 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         );
         for (index; index < blockEraLength; index++) {
             if (
-                _owners[tokenId][index].owner == from &&
-                _owners[tokenId][index+1].owner == to
+                _owners[tokenId].get(index).owner == from &&
+                _owners[tokenId].get(index+1).owner == to
             ) {
                 break;
             }
@@ -229,6 +227,29 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         );
         _frozen[tokenId] = true;
         return true;
+    }
+
+    function reverse(
+        uint256 tokenId,
+        address original_owner
+    ) public onlyGovernance returns (bool successful) {
+        //transfer back to original owner/victim
+        address owner = _owners[tokenId].get(_owners[tokenId].length() - 1).owner;
+        _frozen[tokenId] = false;
+        transferFrom(owner, original_owner, tokenId);
+        return true;
+    }
+
+    function clean(uint256[] calldata tokenIds) external {
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            require(_owners[tokenIds[i]].length() > 1, "Cannot delete record of current owner");
+            uint256 j = 0;
+            while (_owners[tokenIds[i]].length() > 1){
+                if (_owners[tokenIds[i]].get(j+1).startBlock < block.number - NUM_REVERSIBLE_BLOCKS){
+                    _owners[tokenIds[i]].dequeue();
+                }
+            }
+        }
     }
 
     /**
@@ -620,4 +641,35 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         address to,
         uint256 tokenId
     ) internal virtual {}
+}
+
+contract OwningQueue {
+    struct Owning {
+        address owner;
+        uint256 startBlock;
+    }
+    mapping(uint256 => Owning) queue;
+    uint256 first = 0;
+    uint256 last = 0; // not inclusive
+
+    function enqueue(Owning data) public {
+        queue[last] = data;
+        last += 1;
+    }
+
+    function dequeue() public {
+        require(last > first, "Empty queue.");
+        data = queue[first];
+        delete queue[first];
+        first += 1;
+    }
+
+    function get(uint256 idx) public return (Owning data) {
+        require(idx >= first && idx < last, "Invalid indexing.");
+        return queue[idx];
+    }
+
+    function length() public return (uint256 len) {
+        return last - first;
+    }
 }
