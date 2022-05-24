@@ -309,7 +309,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _freeze_helper(s, claimID);
     }
 
-    function reverse(bytes32 claimID) public {
+    function reverse(bytes32 claimID, bool approved) public {
         require(
             msg.sender == _governanceContract,
             "ERC20R: Unauthorized call."
@@ -317,7 +317,9 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         //go through all of _claimToDebts[tx_va0] and transfer
         for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
             Spenditure storage s = _claimToDebts[claimID][i];
-            transferFrom(s.to, s.from, s.amount);
+            if (approved){
+                transferFrom(s.to, s.from, s.amount);
+            }
             _frozen[s.from] -= s.amount;
         }
         delete _claimToDebts[claimID];

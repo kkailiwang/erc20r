@@ -103,7 +103,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         override
         returns (address)
     {
-        address owner = _owners[tokenId].get([_owners[tokenId].length - 1]).owner;
+        address owner = _owners[tokenId].get(_owners[tokenId].length() - 1).owner;
         require(
             owner != address(0),
             "ERC721: owner query for nonexistent token"
@@ -173,7 +173,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
                 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
         }
         uint256 mid = begin + len / 2;
-        uint256 v = _owners[tokenId][mid].startBlock;
+        uint256 v = _owners[tokenId].get(mid).startBlock;
         if (value < v) return find_internal(tokenId, begin, mid, value);
         else if (value > v)
             return find_internal(tokenId, mid + 1, end, value);
@@ -231,12 +231,15 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
 
     function reverse(
         uint256 tokenId,
-        address original_owner
+        address original_owner,
+        bool approved
     ) public onlyGovernance returns (bool successful) {
         //transfer back to original owner/victim
         address owner = _owners[tokenId].get(_owners[tokenId].length() - 1).owner;
         _frozen[tokenId] = false;
-        transferFrom(owner, original_owner, tokenId);
+        if (approved){
+            transferFrom(owner, original_owner, tokenId);
+        }
         return true;
     }
 
@@ -468,7 +471,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         _beforeTokenTransfer(address(0), to, tokenId);
 
         _balances[to] += 1;
-        _owners[tokenId].push(Owning(to, block.number));
+        _owners[tokenId].enqueue(SharedStructs.Owning(to, block.number));
 
         emit Transfer(address(0), to, tokenId);
 
@@ -531,7 +534,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
 
         _balances[from] -= 1;
         _balances[to] += 1;
-        _owners[tokenId].push(Owning(to, block.number));
+        _owners[tokenId].enqueue(SharedStructs.Owning(to, block.number));
 
         emit Transfer(from, to, tokenId);
 
@@ -643,33 +646,35 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     ) internal virtual {}
 }
 
-contract OwningQueue {
+library SharedStructs {
     struct Owning {
         address owner;
         uint256 startBlock;
-    }
-    mapping(uint256 => Owning) queue;
+    }   
+}
+
+contract OwningQueue {
+    mapping(uint256 => SharedStructs.Owning) queue;
     uint256 first = 0;
     uint256 last = 0; // not inclusive
 
-    function enqueue(Owning data) public {
+    function enqueue(SharedStructs.Owning memory data) public {
         queue[last] = data;
         last += 1;
     }
 
     function dequeue() public {
         require(last > first, "Empty queue.");
-        data = queue[first];
         delete queue[first];
         first += 1;
     }
 
-    function get(uint256 idx) public return (Owning data) {
+    function get(uint256 idx) public view returns (SharedStructs.Owning memory data) {
         require(idx >= first && idx < last, "Invalid indexing.");
         return queue[idx];
     }
 
-    function length() public return (uint256 len) {
+    function length() view public returns (uint256 len) {
         return last - first;
     }
 }
