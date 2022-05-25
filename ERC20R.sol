@@ -37,14 +37,22 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _frozen;
     mapping(uint256 => mapping(address => Spenditure[])) private _spenditures;
     mapping(bytes32 => Spenditure[]) private _claimToDebts;
+    mapping(uint256 => uint256) private _numAddressesInEra;
 
-    uint256 private DELTA = 1000; // could be higher or lower.
-    uint256 private NUM_REVERSIBLE_BLOCKS = 88000;
+    modifier governanceOnly() {
+        require(
+            msg.sender == _governanceContract,
+            "ERC721R: Unauthorized call."
+        );
+        _;
+    }
+
+    uint256 private DELTA = 1000;
+    uint256 private NUM_REVERSIBLE_BLOCKS;
 
     mapping(address => mapping(address => uint256)) private _allowances;
 
     uint256 private _totalSupply;
-    uint256 private _stakeConstant; // todo: change to percentage
     address private _governanceContract;
 
     string private _name;
@@ -54,11 +62,10 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address from;
         address to;
         uint256 amount;
-        uint256 block_number; //change in other places
+        uint256 block_number;
     }
 
-    event SavedNewAddressForBlock(address addr, uint256 blockNum);
-    event ClearedDataInTimeblock(address[] addresses, uint256 blockNum);
+    event ClearedDataInTimeblock(uint256 length, uint256 blockNum);
 
     /**
      * @dev Sets the values for {name} and {symbol}.
@@ -72,10 +79,12 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     constructor(
         string memory name_,
         string memory symbol_,
+        uint256 reversiblePeriod_,
         address governanceContract_
     ) {
         _name = name_;
         _symbol = symbol_;
+        NUM_REVERSIBLE_BLOCKS = reversiblePeriod_;
         _governanceContract = governanceContract_;
     }
 
@@ -146,9 +155,6 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         returns (bool)
     {
         address owner = _msgSender();
-        _spenditures[block.number][owner].push(
-            Spenditure(owner, to, amount, block.number)
-        );
         _transfer(owner, to, amount);
         return true;
     }
@@ -260,12 +266,9 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address from,
         address to,
         uint256 amount,
-        uint256 blockNumber
-    ) public returns (bytes32 claimID) {
-        require(
-            msg.sender == _governanceContract,
-            "ERC20R: Unauthorized call."
-        );
+        uint256 blockNumber,
+        uint256 index
+    ) public governanceOnly returns (bytes32 claimID) {
         require(
             blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
             "ERC20R: specified transaction is no longer reversible."
@@ -279,64 +282,56 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 blockEra = blockNumber / DELTA;
         uint256 blockEraLength = _spenditures[blockEra][from].length;
         // do binary search for it
-        uint256 index = find_internal(
-            blockEra,
-            from,
-            0,
-            blockEraLength,
-            blockNumber
+        require(
+            index >= 0 && index < blockEraLength,
+            "ERC20R: Invalid index provided."
         );
         require(
-            index >= 0,
-            "ERC20R: Verification of specified transaction failed."
+            _spenditures[blockEra][from][index].to == to &&
+                _spenditures[blockEra][from][index].amount == amount,
+            "ERC20R: index given does not match spenditure"
         );
-        for (index; index < blockEraLength; index++) {
-            if (
-                _spenditures[blockEra][from][index].to == to &&
-                _spenditures[blockEra][from][index].amount == amount
-            ) {
-                break;
-            }
-        }
-        require(
-            index < blockEraLength,
-            "ERC20R: Verification of specified transaction failed."
-        );
-
         //hash the spenditure; this is the claim hash now. what about two identical
         Spenditure storage s = _spenditures[blockEra][from][index];
         claimID = keccak256(abi.encode(s));
         _freeze_helper(s, claimID);
     }
 
-    function reverse(bytes32 claimID, bool approved) public {
-        require(
-            msg.sender == _governanceContract,
-            "ERC20R: Unauthorized call."
-        );
+    function reverse(bytes32 claimID, bool approved) public governanceOnly {
         //go through all of _claimToDebts[tx_va0] and transfer
         for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
             Spenditure storage s = _claimToDebts[claimID][i];
-            if (approved){
+            _frozen[s.from] -= s.amount;
+            if (approved) {
                 transferFrom(s.to, s.from, s.amount);
             }
-            _frozen[s.from] -= s.amount;
+            delete _claimToDebts[claimID];
         }
-        delete _claimToDebts[claimID];
     }
 
+    //gelato network - runs daily batches
+
     function clean(address[] calldata addresses, uint256 blockEra) external {
+        //requires you to clear all of it.
         require(
             (blockEra + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
             "ERC20-R: Block era is not allowed to be cleared yet."
         );
+        require(
+            _numAddressesInEra[blockEra] == addresses.length,
+            "ERC20R: Must clear the entire block era's data at once."
+        );
         for (uint256 i = 0; i < addresses.length; i++) {
+            //require it to have data, not empty arrary
+            require(
+                _spenditures[blockEra][addresses[i]].length > 0,
+                "ERC20R: addresses to clean for block era does not match the actual data storage."
+            );
             delete _spenditures[blockEra][addresses[i]];
         }
-        emit ClearedDataInTimeblock(addresses, blockEra);
+        _numAddressesInEra[blockEra] = 0;
+        emit ClearedDataInTimeblock(addresses.length, blockEra);
     }
-
-    //put in a separate file
 
     /**
      * @dev See {IERC20-allowance}.
@@ -482,10 +477,26 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             fromBalance >= amount,
             "ERC20: transfer amount exceeds balance"
         );
+        uint256 amountRemaining = fromBalance - amount;
+        require(
+            amountRemaining > _frozen[from],
+            "ERC20R: Cannot spend frozen money in account."
+        );
+
         unchecked {
             _balances[from] = fromBalance - amount;
         }
         _balances[to] += amount;
+
+        uint256 blockEra = block.number / DELTA;
+        if (_spenditures[blockEra][from].length == 0) {
+            //new value stored for mapping
+            _numAddressesInEra[blockEra] += 1;
+        }
+
+        _spenditures[blockEra][from].push(
+            Spenditure(from, to, amount, block.number)
+        );
 
         emit Transfer(from, to, amount);
 
@@ -609,13 +620,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address from,
         address to,
         uint256 amount
-    ) internal virtual {
-        uint256 amountRemaining = _balances[from] - amount;
-        require(
-            amountRemaining > _frozen[from],
-            "ERC20R: Cannot spend frozen money in account."
-        );
-    }
+    ) internal virtual {}
 
     /**
      * @dev Hook that is called after any transfer of tokens. This includes
