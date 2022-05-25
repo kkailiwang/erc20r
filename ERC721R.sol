@@ -205,7 +205,11 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     ) public onlyGovernance returns (bool successful) {
         //transfer back to original owner/victim
         address owner = _owners[tokenId]
+<<<<<<< HEAD
             .get(_owners[tokenId].getLast() - 1)
+=======
+            .get(_owners[tokenId].length() - 1)
+>>>>>>> bc32f50aa96804f5026d916b023a5ad5ec743502
             .owner;
         _frozen[tokenId] = false;
         if (approved) {
