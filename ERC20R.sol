@@ -39,7 +39,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     mapping(bytes32 => Spenditure[]) private _claimToDebts;
     mapping(uint256 => uint256) private _numAddressesInEra;
 
-    modifier governanceOnly() {
+    modifier onlyGovernance() {
         require(
             msg.sender == _governanceContract,
             "ERC721R: Unauthorized call."
@@ -268,7 +268,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 amount,
         uint256 blockNumber,
         uint256 index
-    ) public governanceOnly returns (bytes32 claimID) {
+    ) public onlyGovernance returns (bytes32 claimID) {
         require(
             blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
             "ERC20R: specified transaction is no longer reversible."
@@ -297,7 +297,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _freeze_helper(s, claimID);
     }
 
-    function reverse(bytes32 claimID, bool approved) public governanceOnly {
+    function reverse(bytes32 claimID, bool approved) public onlyGovernance {
         //go through all of _claimToDebts[tx_va0] and transfer
         for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
             Spenditure storage s = _claimToDebts[claimID][i];

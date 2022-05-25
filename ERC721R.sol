@@ -161,36 +161,6 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         return "";
     }
 
-    //binary search
-    function find_internal(
-        uint256 tokenId,
-        uint256 begin,
-        uint256 end,
-        uint256 value
-    ) internal returns (uint256 ret) {
-        uint256 len = end - begin;
-        if (
-            len == 0 ||
-            (len == 1 && _owners[tokenId].get(begin).startBlock != value)
-        ) {
-            return
-                0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
-        }
-        uint256 mid = begin + len / 2;
-        uint256 v = _owners[tokenId].get(mid).startBlock;
-        if (value < v) return find_internal(tokenId, begin, mid, value);
-        else if (value > v) return find_internal(tokenId, mid + 1, end, value);
-        else {
-            while (
-                mid - 1 >= 0 &&
-                _owners[tokenId].get(mid - 1).startBlock == value
-            ) {
-                mid--;
-            }
-            return mid;
-        }
-    }
-
     /**
      * @dev freeze
      */
@@ -207,20 +177,19 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         );
         //verify that this transaction happened
         uint256 tokenOwningsFirst = _owners[tokenId].getFirst();
-        uint256 tokenOwningsLast = _owners[tokenId].getLast();
+        uint256 tokenOwningsLength = _owners[tokenId].getLast();
 
         require(
-            index >= tokenOwningsFirst && index < tokenOwningsLast,
+            index >= tokenOwningsFirst &&
+                index < tokenOwningsFirst + tokenOwningsLength,
             "ERC721R: Verification of specified transaction failed."
         );
-        for (index; index < tokenOwningsLast; index++) {
-            if (
-                _owners[tokenId].get(index).owner == from &&
-                _owners[tokenId].get(index + 1).owner == to
-            ) {
-                break;
-            }
-        }
+        require(
+            _owners[tokenId].get(index).owner == from &&
+                _owners[tokenId].get(index + 1).owner == to,
+            "ERC721R: Index does not match the contested ownership."
+        );
+
         require(
             index < tokenOwningsLast,
             "ERC721R: Verification of specified transaction failed."
@@ -236,7 +205,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     ) public onlyGovernance returns (bool successful) {
         //transfer back to original owner/victim
         address owner = _owners[tokenId]
-            .get(_owners[tokenId].length() - 1)
+            .get(_owners[tokenId].getLast() - 1)
             .owner;
         _frozen[tokenId] = false;
         if (approved) {
@@ -665,32 +634,36 @@ library SharedStructs {
 }
 
 contract OwningQueue {
-    mapping(uint256 => SharedStructs.Owning) queue;
+    mapping(uint256 => SharedStructs.Owning) public queue;
     uint256 first = 0;
     uint256 last = 0; // not inclusive
     uint256 MAX_INT =
         0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 
     function enqueue(SharedStructs.Owning memory data) public {
-        if (last == MAX_INT) {
-            _reinit();
-        }
+        // if (last == MAX_INT) {
+        //     _reinit();
+        // }
         queue[last] = data;
         last += 1;
+        require(
+            first != last,
+            "can only use 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff - 1 total slots."
+        );
     }
 
-    function _reinit() private {
-        uint256 i = first;
-        for (; i < last; i++) {
-            queue[i - first] = queue[i];
-            delete queue[i];
-        }
-        first = 0;
-        last = i + 1;
-    }
+    // function _reinit() private {
+    //     uint256 i = first;
+    //     for (; i < last; i++) {
+    //         queue[i - first] = queue[i];
+    //         delete queue[i];
+    //     }
+    //     first = 0;
+    //     last = i + 1;
+    // }
 
     function dequeue() public {
-        require(last > first, "Empty queue.");
+        require(last != first, "Empty queue.");
         delete queue[first];
         first += 1;
     }
@@ -700,12 +673,13 @@ contract OwningQueue {
         view
         returns (SharedStructs.Owning memory data)
     {
-        require(idx >= first && idx < last, "Invalid indexing.");
+        // require((idx >= first && idx < last) || (last < first && idx < last), "Invalid indexing.");
         return queue[idx];
     }
 
     function length() public view returns (uint256 len) {
         return last - first;
+        //works with wrap arounds
     }
 
     function getFirst() public view returns (uint256) {
