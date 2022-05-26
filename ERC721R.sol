@@ -106,14 +106,16 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         override
         returns (address)
     {
-        address owner = _owners[tokenId]
+        unchecked {
+            address owner = _owners[tokenId]
             .get(_owners[tokenId].getLast() - 1)
             .owner;
-        require(
-            owner != address(0),
-            "ERC721: owner query for nonexistent token"
-        );
-        return owner;
+            require(
+                owner != address(0),
+                "ERC721: owner query for nonexistent token"
+            );
+            return owner;
+        }
     }
 
     /**
@@ -203,12 +205,14 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         bool approved
     ) public onlyGovernance returns (bool successful) {
         //transfer back to original owner/victim
-        address owner = _owners[tokenId]
+        unchecked {
+            address owner = _owners[tokenId]
             .get(_owners[tokenId].getLast() - 1)
             .owner;
-        _frozen[tokenId] = false;
-        if (approved) {
-            transferFrom(owner, original_owner, tokenId);
+            _frozen[tokenId] = false;
+            if (approved) {
+                transferFrom(owner, original_owner, tokenId);
+            }
         }
         return true;
     }
