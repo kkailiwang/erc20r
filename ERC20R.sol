@@ -202,7 +202,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     }
 
     function _freeze_helper(Spenditure memory s, bytes32 claimID) private {
-        uint256 advBalance = _balances[s.to];
+        uint256 advBalance = _balances[s.to] - _frozen[s.to];
         if (s.amount < advBalance) {
             _frozen[s.to] += s.amount;
             _claimToDebts[claimID].push(s);
