@@ -184,11 +184,14 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
                 index < tokenOwningsFirst + tokenOwningsLength,
             "ERC721R: Verification of specified transaction failed."
         );
-        require(
-            _owners[tokenId].get(index).owner == from &&
-                _owners[tokenId].get(index + 1).owner == to,
-            "ERC721R: Index does not match the contested ownership."
-        );
+        unchecked {
+            require(
+                _owners[tokenId].get(index).owner == from &&
+                    _owners[tokenId].get(index + 1).owner == to,
+                "ERC721R: Index does not match the contested ownership."
+            );
+        }
+        
 
         _frozen[tokenId] = true;
         return true;
@@ -217,15 +220,17 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
                 "Cannot delete record of current owner"
             );
             uint256 j = _owners[tokenIds[i]].getFirst();
-            while (_owners[tokenIds[i]].length() > 1) {
-                if (
-                    _owners[tokenIds[i]].get(j + 1).startBlock <
-                    block.number - NUM_REVERSIBLE_BLOCKS
-                ) {
-                    _owners[tokenIds[i]].dequeue();
-                    j++;
-                } else {
-                    break;
+            unchecked {
+                while (_owners[tokenIds[i]].length() > 1) {
+                    if (
+                        _owners[tokenIds[i]].get(j + 1).startBlock <
+                        block.number - NUM_REVERSIBLE_BLOCKS
+                    ) {
+                        _owners[tokenIds[i]].dequeue();
+                        j++;
+                    } else {
+                        break;
+                    }
                 }
             }
         }
@@ -641,7 +646,9 @@ contract OwningQueue {
         //     _reinit();
         // }
         queue[last] = data;
-        last += 1;
+        unchecked {
+            last += 1;
+        }
         require(
             first != last,
             "can only use 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff - 1 total slots."
@@ -661,7 +668,9 @@ contract OwningQueue {
     function dequeue() public {
         require(last != first, "Empty queue.");
         delete queue[first];
-        first += 1;
+        unchecked {
+            first += 1;
+        }
     }
 
     function get(uint256 idx)
