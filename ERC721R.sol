@@ -181,12 +181,12 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         uint256 tokenOwningsFirst = _owners[tokenId].getFirst();
         uint256 tokenOwningsLength = _owners[tokenId].getLast();
 
-        require(
-            index >= tokenOwningsFirst &&
-                index < tokenOwningsFirst + tokenOwningsLength,
-            "ERC721R: Verification of specified transaction failed."
-        );
         unchecked {
+            require(
+                index >= tokenOwningsFirst &&
+                    index < tokenOwningsFirst + tokenOwningsLength - 1,
+                "ERC721R: Verification of specified transaction failed."
+            );
             require(
                 _owners[tokenId].get(index).owner == from &&
                     _owners[tokenId].get(index + 1).owner == to,
@@ -194,26 +194,27 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
             );
         }
         
-
         _frozen[tokenId] = true;
         return true;
     }
 
     function reverse(
         uint256 tokenId,
-        address original_owner,
-        bool approved
-    ) public onlyGovernance returns (bool successful) {
+        address original_owner
+    ) external onlyGovernance returns (bool successful) {
         //transfer back to original owner/victim
         unchecked {
             address owner = _owners[tokenId]
             .get(_owners[tokenId].getLast() - 1)
             .owner;
             _frozen[tokenId] = false;
-            if (approved) {
-                transferFrom(owner, original_owner, tokenId);
-            }
+            transferFrom(owner, original_owner, tokenId);
         }
+        return true;
+    }
+
+    function rejectReverse(uint256 tokenId) external onlyGovernance returns (bool successful) {
+        _frozen[tokenId] = false;
         return true;
     }
 
