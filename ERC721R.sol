@@ -107,7 +107,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
         returns (address)
     {
         address owner = _owners[tokenId]
-            .get(_owners[tokenId].length() - 1)
+            .get(_owners[tokenId].getLast() - 1)
             .owner;
         require(
             owner != address(0),
@@ -190,10 +190,6 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
             "ERC721R: Index does not match the contested ownership."
         );
 
-        require(
-            index < tokenOwningsLast,
-            "ERC721R: Verification of specified transaction failed."
-        );
         _frozen[tokenId] = true;
         return true;
     }
@@ -205,11 +201,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     ) public onlyGovernance returns (bool successful) {
         //transfer back to original owner/victim
         address owner = _owners[tokenId]
-<<<<<<< HEAD
             .get(_owners[tokenId].getLast() - 1)
-=======
-            .get(_owners[tokenId].length() - 1)
->>>>>>> bc32f50aa96804f5026d916b023a5ad5ec743502
             .owner;
         _frozen[tokenId] = false;
         if (approved) {
