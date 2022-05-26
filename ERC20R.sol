@@ -297,14 +297,20 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _freeze_helper(s, claimID);
     }
 
-    function reverse(bytes32 claimID, bool approved) public onlyGovernance {
+    function reverse(bytes32 claimID) external onlyGovernance {
         //go through all of _claimToDebts[tx_va0] and transfer
         for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
             Spenditure storage s = _claimToDebts[claimID][i];
             _frozen[s.from] -= s.amount;
-            if (approved) {
-                transferFrom(s.to, s.from, s.amount);
-            }
+            transferFrom(s.to, s.from, s.amount);
+            delete _claimToDebts[claimID];
+        }
+    }
+
+    function rejectReverse(bytes32 claimID) external onlyGovernance {
+        for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
+            Spenditure storage s = _claimToDebts[claimID][i];
+            _frozen[s.from] -= s.amount;
             delete _claimToDebts[claimID];
         }
     }
