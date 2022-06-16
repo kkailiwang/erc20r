@@ -1,5 +1,5 @@
 
-//example script scraping all of the transaction data that must be cleaned for a given block era. 
+//example script scraping all of the stored data in the contract that must be cleaned. 
 
 type TransferFromEvent = {
     returnValues: {

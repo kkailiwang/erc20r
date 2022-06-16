@@ -647,4 +647,12 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address to,
         uint256 amount
     ) internal virtual {}
+
+    function getSpenditures(uint256 blockera, address from)
+        external
+        view
+        returns (Spenditure[] memory)
+    {
+        return _spenditures[blockera][from];
+    }
 }
