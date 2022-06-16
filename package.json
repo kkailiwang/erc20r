@@ -1,7 +1,8 @@
 {
   "dependencies": {
     "@chainlink/contracts": "^0.4.1",
-    "@openzeppelin/contracts": "^4.6.0"
+    "@openzeppelin/contracts": "^4.6.0",
+    "web3": "^1.7.3"
   },
   "devDependencies": {
     "hardhat": "^2.9.5"

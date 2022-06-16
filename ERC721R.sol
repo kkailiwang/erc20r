@@ -25,7 +25,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     // Token symbol
     string private _symbol;
 
-    uint256 private NUM_REVERSIBLE_BLOCKS = 88000;
+    uint256 public NUM_REVERSIBLE_BLOCKS = 88000;
     address private _governanceContract;
 
     // Mapping from token ID to owner address
@@ -108,8 +108,8 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     {
         unchecked {
             address owner = _owners[tokenId]
-            .get(_owners[tokenId].getLast() - 1)
-            .owner;
+                .get(_owners[tokenId].getLast() - 1)
+                .owner;
             require(
                 owner != address(0),
                 "ERC721: owner query for nonexistent token"
@@ -193,27 +193,32 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
                 "ERC721R: Index does not match the contested ownership."
             );
         }
-        
+
         _frozen[tokenId] = true;
         return true;
     }
 
-    function reverse(
-        uint256 tokenId,
-        address original_owner
-    ) external onlyGovernance returns (bool successful) {
+    function reverse(uint256 tokenId, address original_owner)
+        external
+        onlyGovernance
+        returns (bool successful)
+    {
         //transfer back to original owner/victim
         unchecked {
             address owner = _owners[tokenId]
-            .get(_owners[tokenId].getLast() - 1)
-            .owner;
+                .get(_owners[tokenId].getLast() - 1)
+                .owner;
             _frozen[tokenId] = false;
             transferFrom(owner, original_owner, tokenId);
         }
         return true;
     }
 
-    function rejectReverse(uint256 tokenId) external onlyGovernance returns (bool successful) {
+    function rejectReverse(uint256 tokenId)
+        external
+        onlyGovernance
+        returns (bool successful)
+    {
         _frozen[tokenId] = false;
         return true;
     }
