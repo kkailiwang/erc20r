@@ -35,7 +35,7 @@ import "@openzeppelin/contracts/utils/Context.sol";
 contract ERC20R is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _balances;
     mapping(address => uint256) private _frozen;
-    mapping(uint256 => mapping(address => Spenditure[])) private _spenditures;
+    mapping(uint256 => mapping(address => Spenditure[])) private spenditures;
     mapping(bytes32 => Spenditure[]) private _claimToDebts;
     mapping(uint256 => uint256) private _numAddressesInEra;
 
@@ -164,7 +164,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         returns (Spenditure[] memory suspects, uint256 sum)
     {
         uint256 startBlockEra = startBlock / DELTA;
-        uint256 startEraLength = _spenditures[startBlockEra][from].length;
+        uint256 startEraLength = spenditures[startBlockEra][from].length;
         uint256 index = find_internal(
             startBlockEra,
             from,
@@ -177,25 +177,25 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 lastEra = block.number / DELTA;
 
         for (uint256 i = startBlockEra + 1; i < lastEra; i++) {
-            n += _spenditures[i][from].length;
+            n += spenditures[i][from].length;
         }
         suspects = new Spenditure[](n);
         uint256 counter = 0;
         for (index; index < startEraLength; index++) {
-            Spenditure memory curr = _spenditures[startBlockEra][from][index];
+            Spenditure memory curr = spenditures[startBlockEra][from][index];
             suspects[counter] = Spenditure(
                 curr.from,
                 curr.to,
                 curr.amount,
                 curr.block_number
             );
-            sum += _spenditures[startBlockEra][from][index].amount;
+            sum += spenditures[startBlockEra][from][index].amount;
             counter++;
         }
         for (uint256 i = startBlockEra + 1; i < lastEra; i++) {
-            for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
-                suspects[counter] = _spenditures[i][from][j];
-                sum += _spenditures[i][from][j].amount;
+            for (uint256 j = 0; j < spenditures[i][from].length; j++) {
+                suspects[counter] = spenditures[i][from][j];
+                sum += spenditures[i][from][j].amount;
             }
             counter++;
         }
@@ -240,20 +240,20 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         if (
             len == 0 ||
             (len == 1 &&
-                _spenditures[blockEra][from][begin].block_number != value)
+                spenditures[blockEra][from][begin].block_number != value)
         ) {
             return
                 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
         }
         uint256 mid = begin + len / 2;
-        uint256 v = _spenditures[blockEra][from][mid].block_number;
+        uint256 v = spenditures[blockEra][from][mid].block_number;
         if (value < v) return find_internal(blockEra, from, begin, mid, value);
         else if (value > v)
             return find_internal(blockEra, from, mid + 1, end, value);
         else {
             while (
                 mid - 1 >= 0 &&
-                _spenditures[blockEra][from][mid - 1].block_number == value
+                spenditures[blockEra][from][mid - 1].block_number == value
             ) {
                 mid--;
             }
@@ -280,19 +280,19 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
 
         //verify that this transaction happened
         uint256 blockEra = blockNumber / DELTA;
-        uint256 blockEraLength = _spenditures[blockEra][from].length;
+        uint256 blockEraLength = spenditures[blockEra][from].length;
         // do binary search for it
         require(
             index >= 0 && index < blockEraLength,
             "ERC20R: Invalid index provided."
         );
         require(
-            _spenditures[blockEra][from][index].to == to &&
-                _spenditures[blockEra][from][index].amount == amount,
+            spenditures[blockEra][from][index].to == to &&
+                spenditures[blockEra][from][index].amount == amount,
             "ERC20R: index given does not match spenditure"
         );
         //hash the spenditure; this is the claim hash now. what about two identical
-        Spenditure storage s = _spenditures[blockEra][from][index];
+        Spenditure storage s = spenditures[blockEra][from][index];
         claimID = keccak256(abi.encode(s));
         _freeze_helper(s, claimID);
     }
@@ -330,10 +330,10 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         for (uint256 i = 0; i < addresses.length; i++) {
             //require it to have data, not empty arrary
             require(
-                _spenditures[blockEra][addresses[i]].length > 0,
+                spenditures[blockEra][addresses[i]].length > 0,
                 "ERC20R: addresses to clean for block era does not match the actual data storage."
             );
-            delete _spenditures[blockEra][addresses[i]];
+            delete spenditures[blockEra][addresses[i]];
         }
         _numAddressesInEra[blockEra] = 0;
         emit ClearedDataInTimeblock(addresses.length, blockEra);
@@ -495,12 +495,12 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _balances[to] += amount;
 
         uint256 blockEra = block.number / DELTA;
-        if (_spenditures[blockEra][from].length == 0) {
+        if (spenditures[blockEra][from].length == 0) {
             //new value stored for mapping
             _numAddressesInEra[blockEra] += 1;
         }
 
-        _spenditures[blockEra][from].push(
+        spenditures[blockEra][from].push(
             Spenditure(from, to, amount, block.number)
         );
 
@@ -648,11 +648,19 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 amount
     ) internal virtual {}
 
-    function getSpenditures(uint256 blockera, address from)
-        external
-        view
-        returns (Spenditure[] memory)
-    {
-        return _spenditures[blockera][from];
-    }
+    // function getSpenditures(uint256 blockera, address from)
+    //     external
+    //     view
+    //     returns (Spenditure[] memory)
+    // {
+    //     return spenditures[blockera][from];
+    // }
+
+    // function getSpendituresArray(uint256 blockera, address from)
+    //     external
+    //     view
+    //     returns ()
+    // {
+
+    // }
 }

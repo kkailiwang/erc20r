@@ -16,7 +16,14 @@ type TxInfo = {
     input: string,
 }
 
-function binarySearch(ar, el, compare_fn) {
+type Spenditure = {
+    to: string,
+    from: string,
+    amount: number,
+    block_number: number
+}
+
+function binarySearch(ar, el, compare_fn): number {
     var m = 0;
     var n = ar.length - 1;
     while (m <= n) {
@@ -27,10 +34,20 @@ function binarySearch(ar, el, compare_fn) {
         } else if (cmp < 0) {
             n = k - 1;
         } else {
-            return k;
+            //go backwards until you find the first instance
+            while (k >= 0 && cmp == 0) {
+                k--;
+                cmp = compare_fn(el, ar[k]);
+            }
+            return k + 1;
         }
     }
+    //didn't find it 
     return -m - 1;
+}
+
+function compareEras(a, b) {
+    return b.block_number - a.block_number;
 }
 
 (async () => {
@@ -38,12 +55,17 @@ function binarySearch(ar, el, compare_fn) {
     const contract = new web3.eth.Contract(ERC20RABI, ERC20Raddress);
     const tx: TxInfo = await web3.eth.getTransaction(txId);
     const { blockNumber, from, to, value } = tx;
+    const target: Spenditure = { from, to, block_number: blockNumber, amount: Number(value) }
     const DELTA: number = await contract.methods.DELTA.call();
     const blockEra = Math.floor(blockNumber / DELTA);
-    const spenditures = await contract.methods.getSpenditures(blockEra, from).call();
-    function compareEras(a, b) {
-
+    const spenditures: Array<Spenditure> = await contract.methods.Spenditures(blockEra, from).call();
+    let i = binarySearch(spenditures, target, compareEras);
+    if (i < 0) throw Error('No such transaction found as a spenditure in ERC-20R contract.');
+    for (; i < spenditures.length && compareEras(spenditures[i], target) == 0; i++) {
+        const curr = spenditures[i];
+        if (curr.amount == target.amount && curr.to == target.to) {
+            return i;
+        }
     }
-
-
+    throw Error('No such transaction found as a spenditure in ERC-20R contract.');
 })()
