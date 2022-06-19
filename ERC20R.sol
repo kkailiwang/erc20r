@@ -35,7 +35,7 @@ import "@openzeppelin/contracts/utils/Context.sol";
 contract ERC20R is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _balances;
     mapping(address => uint256) private _frozen;
-    mapping(uint256 => mapping(address => Spenditure[])) private spenditures;
+    mapping(uint256 => mapping(address => Spenditure[])) public spenditures;
     mapping(bytes32 => Spenditure[]) private _claimToDebts;
     mapping(uint256 => uint256) private _numAddressesInEra;
 
@@ -647,20 +647,4 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address to,
         uint256 amount
     ) internal virtual {}
-
-    // function getSpenditures(uint256 blockera, address from)
-    //     external
-    //     view
-    //     returns (Spenditure[] memory)
-    // {
-    //     return spenditures[blockera][from];
-    // }
-
-    // function getSpendituresArray(uint256 blockera, address from)
-    //     external
-    //     view
-    //     returns ()
-    // {
-
-    // }
 }

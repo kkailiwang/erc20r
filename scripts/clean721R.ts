@@ -26,7 +26,7 @@ type TransferFromEvent = {
     const findTokenIdsToClean = async () => {
         const numReversibleBlocks = await contract.methods.NUM_REVERSIBLE_BLOCKS().call();
         const currblock = await web3.eth.getBlockNumber();
-        const transfers: Array<TransferFromEvent> = await contract.getPastEvents('transferFrom', { fromBlock: 0, toBlock: currblock - numReversibleBlocks });
+        const transfers: Array<TransferFromEvent> = await contract.getPastEvents('Transfer', { fromBlock: 0, toBlock: currblock - numReversibleBlocks });
         return Array(...new Set(transfers.map(transfer => transfer.returnValues.tokenId)));
     }
 

@@ -29,7 +29,7 @@ contract ERC721 is Context, ERC165, IERC721, IERC721Metadata {
     address private _governanceContract;
 
     // Mapping from token ID to owner address
-    mapping(uint256 => OwningQueue) private _owners;
+    mapping(uint256 => OwningQueue) public _owners;
 
     // Mapping owner address to token count
     mapping(address => uint256) private _balances;

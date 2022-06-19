@@ -23,7 +23,7 @@ type Spenditure = {
     block_number: number
 }
 
-function binarySearch(ar, el, compare_fn): number {
+function binarySearch(ar: Array<Spenditure>, el: Spenditure, compare_fn: Function): number {
     var m = 0;
     var n = ar.length - 1;
     while (m <= n) {
@@ -58,7 +58,7 @@ function compareEras(a, b) {
     const target: Spenditure = { from, to, block_number: blockNumber, amount: Number(value) }
     const DELTA: number = await contract.methods.DELTA.call();
     const blockEra = Math.floor(blockNumber / DELTA);
-    const spenditures: Array<Spenditure> = await contract.methods.Spenditures(blockEra, from).call();
+    const spenditures: Array<Spenditure> = await contract.methods.spenditures(blockEra, from).call();
     let i = binarySearch(spenditures, target, compareEras);
     if (i < 0) throw Error('No such transaction found as a spenditure in ERC-20R contract.');
     for (; i < spenditures.length && compareEras(spenditures[i], target) == 0; i++) {
