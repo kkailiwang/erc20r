@@ -21,19 +21,6 @@
         blockNumber: number,
         address: string,
     }
-    type TxInfo = {
-        hash: string,
-        nonce: number,
-        blockHash: string,
-        blockNumber: number,
-        transactionIndex: number,
-        from: string,
-        to: string,
-        value: string,
-        gas: number,
-        gasPrice: string,
-        input: string,
-    }
 
     type Owning = {
         owner: string,
@@ -41,6 +28,7 @@
     }
 
     function binarySearch(ar: Array<Owning>, el: Owning, compare_fn: Function): number {
+        // note: this binary search returns the first possible index of the recipient's record
         var m = 0;
         var n = ar.length - 1;
         while (m <= n) {
@@ -59,33 +47,39 @@
                 return k + 1;
             }
         }
-        //didn't find it 
+        //didn't find the specific startBlock
         return -m - 1;
     }
 
-    function compareEras(a: Owning, b: Owning) {
+    function compareBN(a: Owning, b: Owning) {
         return b.startBlock - a.startBlock;
     }
-
-
 
     const { ERC721RABI, ERC721Raddress, web3, publicKey } = require('./constants');
     const contract = new web3.eth.Contract(ERC721RABI, ERC721Raddress);
     const transfers: Array<TransferFromEvent> = await contract.getPastEvents('Transfer', { filter: { transactionHash: txId } });
-    const { blockNumber, from, to } = tx;
-
+    
+    if (transfers.length != 1){
+        throw Error('Invalid ERC-721R transaction hash.');
+    }
+    const from : string = transfers[0].returnValues.from;
+    const to : string = transfers[0].returnValues.to;
+    const tokenId : number = transfers[0].returnValues.tokenId;
+    const blockNumber : number = transfers[0].blockNumber;
 
     const target: Owning = { owner: to, startBlock: blockNumber }
 
-    const owningQueue: Array<Owning> = await contract.methods._owners(blockEra, from).call();
+    const tokenIdOwners: Array<Owning> = await contract.methods._owners(tokenId).getOwningQueueArr();
 
-    let i = binarySearch(spenditures, target, compareEras);
-    if (i < 0) throw Error('No such transaction found as a spenditure in ERC-20R contract.');
-    for (; i < spenditures.length && compareEras(spenditures[i], target) == 0; i++) {
-        const curr = spenditures[i];
-        if (curr.amount == target.amount && curr.to == target.to) {
-            return i;
+    let i = binarySearch(tokenIdOwners, target, compareBN);
+    if (i < 0) throw Error('No such transaction found as a Owning in ERC-721R contract.');
+    if (i == 0) throw Error('No transaction sender.');
+    for (; i < tokenIdOwners.length && compareBN(tokenIdOwners[i], target) == 0; i++) {
+        const prev = tokenIdOwners[i-1];
+        const curr = tokenIdOwners[i];
+        if (prev.owner == from && curr.owner == target.owner) {
+            return i + await contract.methods._owners(tokenId).getFirst();
         }
     }
-    throw Error('No such transaction found as a spenditure in ERC-20R contract.');
+    throw Error('No such transaction found as a spenditure in ERC-721R contract.');
 })()

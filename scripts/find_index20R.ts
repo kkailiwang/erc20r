@@ -46,7 +46,7 @@ function binarySearch(ar: Array<Spenditure>, el: Spenditure, compare_fn: Functio
     return -m - 1;
 }
 
-function compareEras(a, b) {
+function compareEras(a : Spenditure, b : Spenditure) {
     return b.block_number - a.block_number;
 }
 

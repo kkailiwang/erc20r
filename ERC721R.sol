@@ -652,9 +652,6 @@ contract OwningQueue {
         0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 
     function enqueue(SharedStructs.Owning memory data) public {
-        // if (last == MAX_INT) {
-        //     _reinit();
-        // }
         queue[last] = data;
         unchecked {
             last += 1;
@@ -664,16 +661,6 @@ contract OwningQueue {
             "can only use 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff - 1 total slots."
         );
     }
-
-    // function _reinit() private {
-    //     uint256 i = first;
-    //     for (; i < last; i++) {
-    //         queue[i - first] = queue[i];
-    //         delete queue[i];
-    //     }
-    //     first = 0;
-    //     last = i + 1;
-    // }
 
     function dequeue() public {
         require(last != first, "Empty queue.");
@@ -688,7 +675,6 @@ contract OwningQueue {
         view
         returns (SharedStructs.Owning memory data)
     {
-        // require((idx >= first && idx < last) || (last < first && idx < last), "Invalid indexing.");
         return queue[idx];
     }
 
@@ -703,5 +689,16 @@ contract OwningQueue {
 
     function getLast() public view returns (uint256) {
         return last;
+    }
+
+    function getOwningQueueArr() 
+        external view returns (SharedStructs.Owning[] memory)
+    {
+        // should only be called by offchain find_index script
+        SharedStructs.Owning[] memory owningArr = new SharedStructs.Owning[](this.length());
+        for (uint256 i = first; i < last; i++){
+            owningArr[i-first] = queue[i];
+        }
+        return owningArr;
     }
 }
