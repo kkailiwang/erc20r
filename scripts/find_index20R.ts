@@ -23,6 +23,7 @@ type Spenditure = {
     block_number: number
 }
 
+//finds first instance of a spenditure that has the specified block number 
 function binarySearch(ar: Array<Spenditure>, el: Spenditure, compare_fn: Function): number {
     var m = 0;
     var n = ar.length - 1;
@@ -46,7 +47,7 @@ function binarySearch(ar: Array<Spenditure>, el: Spenditure, compare_fn: Functio
     return -m - 1;
 }
 
-function compareEras(a : Spenditure, b : Spenditure) {
+function compareEras(a: Spenditure, b: Spenditure) {
     return b.block_number - a.block_number;
 }
 

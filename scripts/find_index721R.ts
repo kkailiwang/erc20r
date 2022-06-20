@@ -57,27 +57,28 @@
 
     const { ERC721RABI, ERC721Raddress, web3, publicKey } = require('./constants');
     const contract = new web3.eth.Contract(ERC721RABI, ERC721Raddress);
+    //get transfer event with this transaction hash.
     const transfers: Array<TransferFromEvent> = await contract.getPastEvents('Transfer', { filter: { transactionHash: txId } });
-    
-    if (transfers.length != 1){
+
+    if (transfers.length != 1) {
         throw Error('Invalid ERC-721R transaction hash.');
     }
-    const from : string = transfers[0].returnValues.from;
-    const to : string = transfers[0].returnValues.to;
-    const tokenId : number = transfers[0].returnValues.tokenId;
-    const blockNumber : number = transfers[0].blockNumber;
+    const { from, to, tokenId } = transfers[0].returnValues;
+    const blockNumber: number = transfers[0].blockNumber;
 
     const target: Owning = { owner: to, startBlock: blockNumber }
 
+    //gets the active owning queue (not absolute indices)
     const tokenIdOwners: Array<Owning> = await contract.methods._owners(tokenId).getOwningQueueArr();
 
     let i = binarySearch(tokenIdOwners, target, compareBN);
     if (i < 0) throw Error('No such transaction found as a Owning in ERC-721R contract.');
     if (i == 0) throw Error('No transaction sender.');
     for (; i < tokenIdOwners.length && compareBN(tokenIdOwners[i], target) == 0; i++) {
-        const prev = tokenIdOwners[i-1];
+        const prev = tokenIdOwners[i - 1];
         const curr = tokenIdOwners[i];
         if (prev.owner == from && curr.owner == target.owner) {
+            //convert to absolute index 
             return i + await contract.methods._owners(tokenId).getFirst();
         }
     }
