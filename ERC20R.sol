@@ -37,7 +37,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _frozen;
     mapping(uint256 => mapping(address => Spenditure[])) public spenditures;
     mapping(bytes32 => Spenditure[]) private _claimToDebts;
-    mapping(uint256 => uint256) private _numAddressesInEra;
+    mapping(uint256 => uint256) private _numAddressesInEpoch;
 
     modifier onlyGovernance() {
         require(
@@ -163,36 +163,36 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         private
         returns (Spenditure[] memory suspects, uint256 sum)
     {
-        uint256 startBlockEra = startBlock / DELTA;
-        uint256 startEraLength = spenditures[startBlockEra][from].length;
+        uint256 startEpoch = startBlock / DELTA;
+        uint256 startEpochLength = spenditures[startEpoch][from].length;
         uint256 index = find_internal(
-            startBlockEra,
+            startEpoch,
             from,
             0,
-            startEraLength,
+            startEpochLength,
             startBlock
         );
         sum = 0;
-        uint256 n = startEraLength - index;
-        uint256 lastEra = block.number / DELTA;
+        uint256 n = startEpochLength - index;
+        uint256 lastEpoch = block.number / DELTA;
 
-        for (uint256 i = startBlockEra + 1; i < lastEra; i++) {
+        for (uint256 i = startEpoch + 1; i < lastEpoch; i++) {
             n += spenditures[i][from].length;
         }
         suspects = new Spenditure[](n);
         uint256 counter = 0;
-        for (index; index < startEraLength; index++) {
-            Spenditure memory curr = spenditures[startBlockEra][from][index];
+        for (index; index < startEpochLength; index++) {
+            Spenditure memory curr = spenditures[startEpoch][from][index];
             suspects[counter] = Spenditure(
                 curr.from,
                 curr.to,
                 curr.amount,
                 curr.block_number
             );
-            sum += spenditures[startBlockEra][from][index].amount;
+            sum += spenditures[startEpoch][from][index].amount;
             counter++;
         }
-        for (uint256 i = startBlockEra + 1; i < lastEra; i++) {
+        for (uint256 i = startEpoch + 1; i < lastEpoch; i++) {
             for (uint256 j = 0; j < spenditures[i][from].length; j++) {
                 suspects[counter] = spenditures[i][from][j];
                 sum += spenditures[i][from][j].amount;
@@ -230,7 +230,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
 
     //binary search
     function find_internal(
-        uint256 blockEra,
+        uint256 epoch,
         address from,
         uint256 begin,
         uint256 end,
@@ -239,21 +239,20 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 len = end - begin;
         if (
             len == 0 ||
-            (len == 1 &&
-                spenditures[blockEra][from][begin].block_number != value)
+            (len == 1 && spenditures[epoch][from][begin].block_number != value)
         ) {
             return
                 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
         }
         uint256 mid = begin + len / 2;
-        uint256 v = spenditures[blockEra][from][mid].block_number;
-        if (value < v) return find_internal(blockEra, from, begin, mid, value);
+        uint256 v = spenditures[epoch][from][mid].block_number;
+        if (value < v) return find_internal(epoch, from, begin, mid, value);
         else if (value > v)
-            return find_internal(blockEra, from, mid + 1, end, value);
+            return find_internal(epoch, from, mid + 1, end, value);
         else {
             while (
                 mid - 1 >= 0 &&
-                spenditures[blockEra][from][mid - 1].block_number == value
+                spenditures[epoch][from][mid - 1].block_number == value
             ) {
                 mid--;
             }
@@ -279,20 +278,20 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         );
 
         //verify that this transaction happened
-        uint256 blockEra = blockNumber / DELTA;
-        uint256 blockEraLength = spenditures[blockEra][from].length;
+        uint256 epoch = blockNumber / DELTA;
+        uint256 epochLength = spenditures[epoch][from].length;
         // do binary search for it
         require(
-            index >= 0 && index < blockEraLength,
+            index >= 0 && index < epochLength,
             "ERC20R: Invalid index provided."
         );
         require(
-            spenditures[blockEra][from][index].to == to &&
-                spenditures[blockEra][from][index].amount == amount,
+            spenditures[epoch][from][index].to == to &&
+                spenditures[epoch][from][index].amount == amount,
             "ERC20R: index given does not match spenditure"
         );
         //hash the spenditure; this is the claim hash now. what about two identical
-        Spenditure storage s = spenditures[blockEra][from][index];
+        Spenditure storage s = spenditures[epoch][from][index];
         claimID = keccak256(abi.encode(s));
         _freeze_helper(s, claimID);
     }
@@ -317,26 +316,26 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
 
     //gelato network - runs daily batches
 
-    function clean(address[] calldata addresses, uint256 blockEra) external {
+    function clean(address[] calldata addresses, uint256 epoch) external {
         //requires you to clear all of it.
         require(
-            (blockEra + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
-            "ERC20-R: Block era is not allowed to be cleared yet."
+            (epoch + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
+            "ERC20-R: Block Epoch is not allowed to be cleared yet."
         );
         require(
-            _numAddressesInEra[blockEra] == addresses.length,
-            "ERC20R: Must clear the entire block era's data at once."
+            _numAddressesInEpoch[epoch] == addresses.length,
+            "ERC20R: Must clear the entire block Epoch's data at once."
         );
         for (uint256 i = 0; i < addresses.length; i++) {
             //require it to have data, not empty arrary
             require(
-                spenditures[blockEra][addresses[i]].length > 0,
-                "ERC20R: addresses to clean for block era does not match the actual data storage."
+                spenditures[epoch][addresses[i]].length > 0,
+                "ERC20R: addresses to clean for block Epoch does not match the actual data storage."
             );
-            delete spenditures[blockEra][addresses[i]];
+            delete spenditures[epoch][addresses[i]];
         }
-        _numAddressesInEra[blockEra] = 0;
-        emit ClearedDataInTimeblock(addresses.length, blockEra);
+        _numAddressesInEpoch[epoch] = 0;
+        emit ClearedDataInTimeblock(addresses.length, epoch);
     }
 
     /**
@@ -494,13 +493,13 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         }
         _balances[to] += amount;
 
-        uint256 blockEra = block.number / DELTA;
-        if (spenditures[blockEra][from].length == 0) {
+        uint256 epoch = block.number / DELTA;
+        if (spenditures[epoch][from].length == 0) {
             //new value stored for mapping
-            _numAddressesInEra[blockEra] += 1;
+            _numAddressesInEpoch[epoch] += 1;
         }
 
-        spenditures[blockEra][from].push(
+        spenditures[epoch][from].push(
             Spenditure(from, to, amount, block.number)
         );
 
