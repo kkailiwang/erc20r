@@ -47,7 +47,6 @@ function checkNames(fragment: Fragment, type: "input" | "output", params: Array<
 */
 export class Interface {
     constructor(fragments) {
-        logger.checkNew(new.target, Interface);
         let abi = [];
         if (typeof (fragments) === "string") {
             abi = JSON.parse(fragments);
@@ -376,6 +375,12 @@ export class Interface {
             }
             else if (param.type === "bytes") {
                 return keccak256(hexlify(value));
+            }
+            if (param.type === "bool" && typeof (value) === "boolean") {
+                value = (value ? "0x01" : "0x00");
+            }
+            if (param.type.match(/^u?int/)) {
+                value = BigNumber.from(value).toHexString();
             }
             // Check addresses are valid
             if (param.type === "address") {

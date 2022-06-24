@@ -90,7 +90,6 @@ var Interface = /** @class */ (function () {
     function Interface(fragments) {
         var _newTarget = this.constructor;
         var _this = this;
-        logger.checkNew(_newTarget, Interface);
         var abi = [];
         if (typeof (fragments) === "string") {
             abi = JSON.parse(fragments);
@@ -424,6 +423,12 @@ var Interface = /** @class */ (function () {
             }
             else if (param.type === "bytes") {
                 return (0, keccak256_1.keccak256)((0, bytes_1.hexlify)(value));
+            }
+            if (param.type === "bool" && typeof (value) === "boolean") {
+                value = (value ? "0x01" : "0x00");
+            }
+            if (param.type.match(/^u?int/)) {
+                value = bignumber_1.BigNumber.from(value).toHexString();
             }
             // Check addresses are valid
             if (param.type === "address") {
