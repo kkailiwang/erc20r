@@ -169,13 +169,9 @@ describe("ERC20R", function () {
         });
     })
     describe("Reverse", function () {
-        let blockNumber;
-        const amount = 200;
-        const index = 1;
+
         beforeEach(async function () {
-            await erc20r.transfer(addr1.address, amount / 4);
-            const tx = await erc20r.transfer(addr1.address, amount);
-            blockNumber = tx.blockNumber;
+
         })
 
         it("Reverse works", async function () {
@@ -188,13 +184,9 @@ describe("ERC20R", function () {
     })
 
     describe("clean", function () {
-        let blockNumber;
-        const amount = 200;
-        const index = 1;
+
         beforeEach(async function () {
-            await erc20r.transfer(addr1.address, amount / 4);
-            const tx = await erc20r.transfer(addr1.address, amount);
-            blockNumber = tx.blockNumber;
+
         })
 
         it("Cleans when parameters are correct", async function () {
