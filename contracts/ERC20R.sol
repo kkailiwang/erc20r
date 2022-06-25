@@ -66,6 +66,16 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     }
 
     event ClearedDataInTimeblock(uint256 length, uint256 blockNum);
+    event FreezeSuccessful(
+        address from,
+        address to,
+        uint256 amount,
+        uint256 blockNumber,
+        uint256 index,
+        bytes32 claimID
+    );
+    event ReverseSuccessful(bytes32 claimID);
+    event ReverseRejected(bytes32 claimID);
 
     /**
      * @dev Sets the values for {name} and {symbol}.
@@ -203,7 +213,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
 
     function _freeze_helper(Spenditure memory s, bytes32 claimID) private {
         uint256 advBalance = _balances[s.to] - _frozen[s.to];
-        if (s.amount < advBalance) {
+        if (s.amount <= advBalance) {
             _frozen[s.to] += s.amount;
             _claimToDebts[claimID].push(s);
         } else {
@@ -280,7 +290,6 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         //verify that this transaction happened
         uint256 epoch = blockNumber / DELTA;
         uint256 epochLength = spenditures[epoch][from].length;
-        // do binary search for it
         require(
             index >= 0 && index < epochLength,
             "ERC20R: Invalid index provided."
@@ -294,6 +303,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         Spenditure storage s = spenditures[epoch][from][index];
         claimID = keccak256(abi.encode(s));
         _freeze_helper(s, claimID);
+        emit FreezeSuccessful(from, to, amount, blockNumber, index, claimID);
     }
 
     function reverse(bytes32 claimID) external onlyGovernance {
@@ -304,6 +314,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             transferFrom(s.to, s.from, s.amount);
             delete _claimToDebts[claimID];
         }
+        emit ReverseSuccessful(claimID);
     }
 
     function rejectReverse(bytes32 claimID) external onlyGovernance {
@@ -312,6 +323,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             _frozen[s.from] -= s.amount;
             delete _claimToDebts[claimID];
         }
+        emit ReverseRejected(claimID);
     }
 
     //gelato network - runs daily batches
