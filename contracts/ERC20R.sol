@@ -6,6 +6,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
+import "hardhat/console.sol";
 
 /**
  * @dev Implementation of the {IERC20} interface.
@@ -34,8 +35,8 @@ import "@openzeppelin/contracts/utils/Context.sol";
  */
 contract ERC20R is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) private _balances;
-    mapping(address => uint256) private _frozen;
-    mapping(uint256 => mapping(address => Spenditure[])) public spenditures;
+    mapping(address => uint256) public frozen;
+    mapping(uint256 => mapping(address => Spenditure[])) private _spenditures;
     mapping(bytes32 => Spenditure[]) private _claimToDebts;
     mapping(uint256 => uint256) private _numAddressesInEpoch;
 
@@ -174,7 +175,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         returns (Spenditure[] memory suspects, uint256 sum)
     {
         uint256 startEpoch = startBlock / DELTA;
-        uint256 startEpochLength = spenditures[startEpoch][from].length;
+        uint256 startEpochLength = _spenditures[startEpoch][from].length;
         uint256 index = find_internal(
             startEpoch,
             from,
@@ -182,42 +183,55 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             startEpochLength,
             startBlock
         );
+        uint256 n = 0;
         sum = 0;
-        uint256 n = startEpochLength - index;
+
         uint256 lastEpoch = block.number / DELTA;
+        if (
+            index !=
+            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        ) {
+            n += startEpochLength - index;
+        }
 
         for (uint256 i = startEpoch + 1; i < lastEpoch; i++) {
-            n += spenditures[i][from].length;
+            n += _spenditures[i][from].length;
         }
         suspects = new Spenditure[](n);
         uint256 counter = 0;
-        for (index; index < startEpochLength; index++) {
-            Spenditure memory curr = spenditures[startEpoch][from][index];
-            suspects[counter] = Spenditure(
-                curr.from,
-                curr.to,
-                curr.amount,
-                curr.block_number
-            );
-            sum += spenditures[startEpoch][from][index].amount;
-            counter++;
+
+        if (
+            index !=
+            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        ) {
+            for (index; index < startEpochLength; index++) {
+                Spenditure memory curr = _spenditures[startEpoch][from][index];
+                suspects[counter] = Spenditure(
+                    curr.from,
+                    curr.to,
+                    curr.amount,
+                    curr.block_number
+                );
+                sum += _spenditures[startEpoch][from][index].amount;
+                counter++;
+            }
         }
         for (uint256 i = startEpoch + 1; i < lastEpoch; i++) {
-            for (uint256 j = 0; j < spenditures[i][from].length; j++) {
-                suspects[counter] = spenditures[i][from][j];
-                sum += spenditures[i][from][j].amount;
+            for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
+                suspects[counter] = _spenditures[i][from][j];
+                sum += _spenditures[i][from][j].amount;
             }
             counter++;
         }
     }
 
     function _freeze_helper(Spenditure memory s, bytes32 claimID) private {
-        uint256 advBalance = _balances[s.to] - _frozen[s.to];
+        uint256 advBalance = _balances[s.to] - frozen[s.to];
         if (s.amount <= advBalance) {
-            _frozen[s.to] += s.amount;
+            frozen[s.to] += s.amount;
             _claimToDebts[claimID].push(s);
         } else {
-            _frozen[s.from] += advBalance;
+            frozen[s.to] += advBalance;
             _claimToDebts[claimID].push(
                 Spenditure(s.from, s.to, advBalance, s.block_number)
             );
@@ -225,12 +239,13 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
                 Spenditure[] memory suspects,
                 uint256 totalAmounts
             ) = _getSuspectTxsFromAddress(s.to, s.block_number + 1);
+            uint256 leftover = s.amount - advBalance;
             for (uint256 i = 0; i < suspects.length; i++) {
                 //responsible amount is weighted
                 Spenditure memory s_next = Spenditure(
                     suspects[i].from,
                     suspects[i].to,
-                    suspects[i].amount / totalAmounts,
+                    (leftover * suspects[i].amount) / totalAmounts,
                     suspects[i].block_number
                 );
                 _freeze_helper(s_next, claimID);
@@ -244,25 +259,28 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address from,
         uint256 begin,
         uint256 end,
-        uint256 value
+        uint256 lowerBound
     ) internal returns (uint256 ret) {
         uint256 len = end - begin;
         if (
             len == 0 ||
-            (len == 1 && spenditures[epoch][from][begin].block_number != value)
+            (len == 1 &&
+                _spenditures[epoch][from][begin].block_number < lowerBound)
         ) {
             return
                 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
         }
         uint256 mid = begin + len / 2;
-        uint256 v = spenditures[epoch][from][mid].block_number;
-        if (value < v) return find_internal(epoch, from, begin, mid, value);
-        else if (value > v)
-            return find_internal(epoch, from, mid + 1, end, value);
+        uint256 v = _spenditures[epoch][from][mid].block_number;
+        if (lowerBound < v)
+            return find_internal(epoch, from, begin, mid, lowerBound);
+        else if (lowerBound > v)
+            return find_internal(epoch, from, mid + 1, end, lowerBound);
         else {
             while (
+                mid > 0 &&
                 mid - 1 >= 0 &&
-                spenditures[epoch][from][mid - 1].block_number == value
+                _spenditures[epoch][from][mid - 1].block_number > lowerBound
             ) {
                 mid--;
             }
@@ -278,10 +296,12 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 blockNumber,
         uint256 index
     ) public onlyGovernance returns (bytes32 claimID) {
-        require(
-            blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
-            "ERC20R: specified transaction is no longer reversible."
-        );
+        if (block.number > NUM_REVERSIBLE_BLOCKS) {
+            require(
+                blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
+                "ERC20R: specified transaction is no longer reversible."
+            );
+        }
         require(
             blockNumber <= block.number,
             "ERC20R: specified transaction block number is greater than the current block number."
@@ -289,18 +309,18 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
 
         //verify that this transaction happened
         uint256 epoch = blockNumber / DELTA;
-        uint256 epochLength = spenditures[epoch][from].length;
+        uint256 epochLength = _spenditures[epoch][from].length;
         require(
             index >= 0 && index < epochLength,
             "ERC20R: Invalid index provided."
         );
         require(
-            spenditures[epoch][from][index].to == to &&
-                spenditures[epoch][from][index].amount == amount,
+            _spenditures[epoch][from][index].to == to &&
+                _spenditures[epoch][from][index].amount == amount,
             "ERC20R: index given does not match spenditure"
         );
         //hash the spenditure; this is the claim hash now. what about two identical
-        Spenditure storage s = spenditures[epoch][from][index];
+        Spenditure storage s = _spenditures[epoch][from][index];
         claimID = keccak256(abi.encode(s));
         _freeze_helper(s, claimID);
         emit FreezeSuccessful(from, to, amount, blockNumber, index, claimID);
@@ -310,7 +330,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         //go through all of _claimToDebts[tx_va0] and transfer
         for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
             Spenditure storage s = _claimToDebts[claimID][i];
-            _frozen[s.from] -= s.amount;
+            frozen[s.from] -= s.amount;
             transferFrom(s.to, s.from, s.amount);
             delete _claimToDebts[claimID];
         }
@@ -320,7 +340,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     function rejectReverse(bytes32 claimID) external onlyGovernance {
         for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
             Spenditure storage s = _claimToDebts[claimID][i];
-            _frozen[s.from] -= s.amount;
+            frozen[s.from] -= s.amount;
             delete _claimToDebts[claimID];
         }
         emit ReverseRejected(claimID);
@@ -341,10 +361,10 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         for (uint256 i = 0; i < addresses.length; i++) {
             //require it to have data, not empty arrary
             require(
-                spenditures[epoch][addresses[i]].length > 0,
+                _spenditures[epoch][addresses[i]].length > 0,
                 "ERC20R: addresses to clean for block Epoch does not match the actual data storage."
             );
-            delete spenditures[epoch][addresses[i]];
+            delete _spenditures[epoch][addresses[i]];
         }
         _numAddressesInEpoch[epoch] = 0;
         emit ClearedDataInTimeblock(addresses.length, epoch);
@@ -496,7 +516,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         );
         uint256 amountRemaining = fromBalance - amount;
         require(
-            amountRemaining > _frozen[from],
+            amountRemaining > frozen[from],
             "ERC20R: Cannot spend frozen money in account."
         );
 
@@ -506,12 +526,12 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _balances[to] += amount;
 
         uint256 epoch = block.number / DELTA;
-        if (spenditures[epoch][from].length == 0) {
+        if (_spenditures[epoch][from].length == 0) {
             //new value stored for mapping
             _numAddressesInEpoch[epoch] += 1;
         }
 
-        spenditures[epoch][from].push(
+        _spenditures[epoch][from].push(
             Spenditure(from, to, amount, block.number)
         );
 
@@ -658,4 +678,12 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address to,
         uint256 amount
     ) internal virtual {}
+
+    function getSpenditures(uint256 epoch, address from)
+        external
+        view
+        returns (Spenditure[] memory)
+    {
+        return _spenditures[epoch][from];
+    }
 }
