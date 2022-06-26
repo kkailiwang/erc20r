@@ -48,8 +48,8 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _;
     }
 
-    uint256 public DELTA = 1000;
-    uint256 private NUM_REVERSIBLE_BLOCKS;
+    uint256 public DELTA = 100;
+    uint256 public NUM_REVERSIBLE_BLOCKS;
 
     mapping(address => mapping(address => uint256)) private _allowances;
 
@@ -330,8 +330,8 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         //go through all of _claimToDebts[tx_va0] and transfer
         for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
             Spenditure storage s = _claimToDebts[claimID][i];
-            frozen[s.from] -= s.amount;
-            transferFrom(s.to, s.from, s.amount);
+            frozen[s.to] -= s.amount;
+            _transfer(s.to, s.from, s.amount);
             delete _claimToDebts[claimID];
         }
         emit ReverseSuccessful(claimID);
@@ -340,18 +340,17 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     function rejectReverse(bytes32 claimID) external onlyGovernance {
         for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
             Spenditure storage s = _claimToDebts[claimID][i];
-            frozen[s.from] -= s.amount;
+            frozen[s.to] -= s.amount;
             delete _claimToDebts[claimID];
         }
         emit ReverseRejected(claimID);
     }
 
-    //gelato network - runs daily batches
-
     function clean(address[] calldata addresses, uint256 epoch) external {
         //requires you to clear all of it.
         require(
-            (epoch + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
+            block.number > NUM_REVERSIBLE_BLOCKS &&
+                (epoch + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
             "ERC20-R: Block Epoch is not allowed to be cleared yet."
         );
         require(
@@ -516,7 +515,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         );
         uint256 amountRemaining = fromBalance - amount;
         require(
-            amountRemaining > frozen[from],
+            amountRemaining >= frozen[from],
             "ERC20R: Cannot spend frozen money in account."
         );
 

@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "/Users/kailiwang/cs_projects/erc20r/contracts/ERC20R.sol": {
-      "lastModificationDate": 1656136612577,
-      "contentHash": "107b340f0fb92164bacb52f76d45271e",
+      "lastModificationDate": 1656215334968,
+      "contentHash": "e2ca2ba612dc5f8ae7479a434e8ec6c7",
       "sourceName": "contracts/ERC20R.sol",
       "solcConfig": {
         "version": "0.8.1",
@@ -445,8 +445,8 @@
       ]
     },
     "/Users/kailiwang/cs_projects/erc20r/contracts/exampleERC20R.sol": {
-      "lastModificationDate": 1656126828762,
-      "contentHash": "3af964423641801746f849705291039e",
+      "lastModificationDate": 1656211197890,
+      "contentHash": "b33ef337faf7c7af73ef0f00f59ef931",
       "sourceName": "contracts/exampleERC20R.sol",
       "solcConfig": {
         "version": "0.8.1",
