@@ -243,7 +243,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             for (uint256 i = 0; i < suspects.length; i++) {
                 //responsible amount is weighted
                 Spenditure memory s_next = Spenditure(
-                    suspects[i].from,
+                    s.from,
                     suspects[i].to,
                     (leftover * suspects[i].amount) / totalAmounts,
                     suspects[i].block_number
@@ -332,8 +332,8 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             Spenditure storage s = _claimToDebts[claimID][i];
             frozen[s.to] -= s.amount;
             _transfer(s.to, s.from, s.amount);
-            delete _claimToDebts[claimID];
         }
+        delete _claimToDebts[claimID];
         emit ReverseSuccessful(claimID);
     }
 
