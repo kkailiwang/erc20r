@@ -18,7 +18,7 @@ const main = async () => {
 
     // Triggers deployment
     //replace constructor arguments with yours here. 
-    const erc721r = await ERC721R.deploy('Test', 'SAYC', '0xf4960B3bf418E0B33E3805d611DD4EDdDB5b43B0');
+    const erc721r = await ERC721R.deploy('Test', 'SAYC', deployer.address);
 
     // Wait for deployment to finish
     await erc721r.deployed();

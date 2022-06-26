@@ -48,10 +48,12 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
     constructor(
         string memory name_,
         string memory symbol_,
+        uint256 reversiblePeriod_,
         address governanceContract_
     ) {
         _name = name_;
         _symbol = symbol_;
+        NUM_REVERSIBLE_BLOCKS = reversiblePeriod_;
         _governanceContract = governanceContract_;
     }
 
