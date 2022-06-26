@@ -49,12 +49,16 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         string memory name_,
         string memory symbol_,
         uint256 reversiblePeriod_,
+        uint256 totalSupply,
         address governanceContract_
     ) {
         _name = name_;
         _symbol = symbol_;
         NUM_REVERSIBLE_BLOCKS = reversiblePeriod_;
         _governanceContract = governanceContract_;
+        for (uint256 i=0; i<totalSupply; i++){
+            _owners[i] = new OwningQueue();
+        }
     }
 
     modifier onlyGovernance() {
@@ -116,6 +120,20 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
                 owner != address(0),
                 "ERC721: owner query for nonexistent token"
             );
+            return owner;
+        }
+    }
+
+    function ownerOfCheckExist(uint256 tokenId)
+        public
+        view
+        virtual
+        returns (address)
+    {
+        unchecked {
+            address owner = _owners[tokenId]
+                .get(_owners[tokenId].getLast() - 1)
+                .owner;
             return owner;
         }
     }
@@ -389,7 +407,7 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
      * and stop existing when they are burned (`_burn`).
      */
     function _exists(uint256 tokenId) internal view virtual returns (bool) {
-        return ownerOf(tokenId) != address(0);
+        return ownerOfCheckExist(tokenId) != address(0);
     }
 
     /**
@@ -673,7 +691,7 @@ contract OwningQueue {
     }
 
     function get(uint256 idx)
-        public
+        external
         view
         returns (SharedStructs.Owning memory data)
     {

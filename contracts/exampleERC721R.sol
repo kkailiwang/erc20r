@@ -8,7 +8,7 @@ contract ExampleERC721R is ERC721R {
         uint256 totalSupply_,
         uint256 numReversibleBlocks,
         address governanceContract
-    ) ERC721R("Test721R", "STAN721", numReversibleBlocks, governanceContract) {
+    ) ERC721R("Test721R", "STAN721", numReversibleBlocks, totalSupply_, governanceContract) {
         for (uint256 i=0; i<totalSupply_; i++){
             _mint(msg.sender, i);
         }
