@@ -221,6 +221,20 @@ describe("ERC20R", function () {
 
             });
 
+            it("Reverse works", async () => {
+                await freeze;
+                const logs = await erc20r.queryFilter('FreezeSuccessful');
+                const { claimID } = logs[0].args;
+                await erc20r.reverse(claimID);
+                const owedBy1 = amount / 2;
+                expect(await erc20r.balanceOf(addr1.address)).to.equal(0);
+                const owedBy2 = Math.floor(amount / 6);
+                expect(await erc20r.balanceOf(addr2.address)).to.equal(amount / 4 - owedBy2);
+                const owedBy3 = Math.floor(amount / 3);
+                expect(await erc20r.balanceOf(addr3.address)).to.equal(amount / 2 - owedBy3);
+                expect(await erc20r.balanceOf(owner.address)).to.equal(TOTAL_SUPPLY - amount / 4 - amount + owedBy1 + owedBy2 + owedBy3);
+            })
+
             it('fails if still in reversible time period', async () => {
                 const epoch = Math.floor(blockNumber / DELTA)
                 await expect(erc20r.clean([owner.address, addr1.address], epoch)).to.be.revertedWith("ERC20-R: Block Epoch is not allowed to be cleared yet.");
