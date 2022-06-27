@@ -18,7 +18,8 @@ const main = async () => {
     const ExampleERC20R = await hre.ethers.getContractFactory('ExampleERC20R');
 
     // Triggers deployment
-    const erc20r = await ExampleERC20R.deploy(TOTAL_SUPPLY);
+    //roughly 1 hour 
+    const erc20r = await ExampleERC20R.deploy(TOTAL_SUPPLY, 360, '0xf4960B3bf418E0B33E3805d611DD4EDdDB5b43B0');
 
     // Wait for deployment to finish
     await erc20r.deployed();

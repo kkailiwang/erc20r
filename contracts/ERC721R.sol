@@ -56,7 +56,7 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         _symbol = symbol_;
         NUM_REVERSIBLE_BLOCKS = reversiblePeriod_;
         _governanceContract = governanceContract_;
-        for (uint256 i=0; i<totalSupply; i++){
+        for (uint256 i = 0; i < totalSupply; i++) {
             _owners[i] = new OwningQueue();
         }
     }

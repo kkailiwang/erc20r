@@ -35,12 +35,10 @@ describe("ERC721R", function () {
                 // Expect receives a value, and wraps it in an Assertion object. These
                 // objects have a lot of utility methods to assert values.
 
-                // This test expects the owner variable stored in the contract to be equal
-                // to our Signer's owner.
-                for (let i=0; i<TOTAL_SUPPLY; i++){
+                for (let i = 0; i < TOTAL_SUPPLY; i++) {
                     expect(await erc721r.ownerOf(i)).to.equal(owner.address);
                 }
-                
+
             });
 
         });
