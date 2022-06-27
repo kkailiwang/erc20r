@@ -3,7 +3,7 @@ const { clean } = require('../scripts/clean20R')
 const { expect } = require("chai");
 const TOTAL_SUPPLY = 1000;
 
-describe("ERC20R", function () {
+describe("ERC20R Offchain scripts", function () {
 
     let ExampleERC20R;
     let erc20r;
