@@ -40,7 +40,17 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
     // Mapping from owner to operator approvals
     mapping(address => mapping(address => bool)) private _operatorApprovals;
 
-    mapping(uint256 => bool) private _frozen;
+    mapping(uint256 => bool) public _frozen;
+
+    event FreezeSuccessful(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256 blockNumber,
+        uint256 index
+    );
+    event ReverseSuccessful(uint256 tokenId, address from);
+    event ReverseRejected(uint256 tokenId);
 
     /**
      * @dev Initializes the contract by setting a `name` and a `symbol` to the token collection.
@@ -193,10 +203,13 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         uint256 blockNumber,
         uint256 index
     ) public onlyGovernance returns (bool successful) {
-        require(
-            blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
-            "ERC721R: specified transaction is no longer reversible."
-        );
+        if (block.number > NUM_REVERSIBLE_BLOCKS) {
+            require(
+                blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
+                "ERC721R: specified transaction is no longer reversible."
+            );
+        }
+        
         //verify that this transaction happened
         uint256 tokenOwningsFirst = _owners[tokenId].getFirst();
         uint256 tokenOwningsLength = _owners[tokenId].getLast();
@@ -215,6 +228,7 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         }
 
         _frozen[tokenId] = true;
+        emit FreezeSuccessful(from, to, tokenId, blockNumber, index);
         return true;
     }
 
@@ -229,8 +243,9 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
                 .get(_owners[tokenId].getLast() - 1)
                 .owner;
             _frozen[tokenId] = false;
-            transferFrom(owner, original_owner, tokenId);
+            _transfer(owner, original_owner, tokenId);
         }
+        emit ReverseSuccessful(tokenId, original_owner);
         return true;
     }
 
@@ -240,6 +255,7 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         returns (bool successful)
     {
         _frozen[tokenId] = false;
+        emit ReverseRejected(tokenId);
         return true;
     }
 
@@ -334,7 +350,7 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         //solhint-disable-next-line max-line-length
         require(
             _isApprovedOrOwner(_msgSender(), tokenId),
-            "ERC721: transfer caller is not owner nor approved"
+            "ERC721R: transfer caller is not owner nor approved"
         );
 
         _transfer(from, to, tokenId);
@@ -533,9 +549,9 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
     ) internal virtual {
         require(
             ownerOf(tokenId) == from,
-            "ERC721: transfer from incorrect owner"
+            "ERC721R: transfer from incorrect owner"
         );
-        require(to != address(0), "ERC721: transfer to the zero address");
+        require(to != address(0), "ERC721R: transfer to the zero address");
         require(_frozen[tokenId] == false, "ERC721R: transfer frozen token");
 
         _beforeTokenTransfer(from, to, tokenId);
@@ -655,6 +671,14 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         address to,
         uint256 tokenId
     ) internal virtual {}
+
+    function getOwnings(uint256 tokenId)
+        external
+        view
+        returns (SharedStructs.Owning[] memory)
+    {
+        return _owners[tokenId].getOwningQueueArr();
+    }
 }
 
 library SharedStructs {
