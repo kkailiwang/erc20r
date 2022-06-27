@@ -46,29 +46,16 @@ describe("ERC20R Offchain scripts", function () {
 
 
             it('findIndex works when index is in middle of spenditures', async () => {
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
+                for (let i = 0; i < 10; i++) {
+                    await erc20r.transfer(addr1.address, 1);
+                }
 
                 const tx = await erc20r.transfer(addr1.address, amount);
                 from = tx.from;
                 blockNumber = tx.blockNumber;
-
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-
-
-
+                for (let i = 0; i < 10; i++) {
+                    await erc20r.transfer(addr1.address, 1);
+                }
                 const foundI = await findIndex(from, addr1.address, blockNumber, amount, erc20r);
                 await erc20r.freeze(owner.address, addr1.address, amount, blockNumber, foundI);
                 const logs = await erc20r.queryFilter('FreezeSuccessful');
@@ -77,15 +64,9 @@ describe("ERC20R Offchain scripts", function () {
             });
 
             it('findIndex works when index is at end of spenditures', async () => {
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
-                await erc20r.transfer(addr1.address, 1);
+                for (let i = 0; i < 13; i++) {
+                    await erc20r.transfer(addr1.address, 1);
+                }
 
                 const tx = await erc20r.transfer(addr1.address, amount);
                 from = tx.from;
