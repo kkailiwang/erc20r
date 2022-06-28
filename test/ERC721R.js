@@ -180,6 +180,56 @@ describe("ERC721R", function () {
     });
 
     describe("Some transactions are out of reversible time period", function () {
+        let blockNumber;
+        const tokenId0 = 0;
+        const tokenId1 = 1;
+        const tokenId2 = 2;
+        let token0Queue;
+        let token1Queue;
+        const numReversibleBlocks = 1;
+        beforeEach(async function () {
+            // Get the ContractFactory and Signers here.
+            ExampleERC721R = await ethers.getContractFactory("ExampleERC721R");
+            [owner, addr1, addr2, addr3] = await ethers.getSigners();
 
+            // To deploy our contract, we just have to call ExampleERC721R.deploy() and await
+            // for it to be deployed(), which happens once its transaction has been
+            // mined.
+            //for simplicity, let's make the owner the governance contract (and is able to call freeze and reverse)
+            erc721r = await ExampleERC721R.deploy(TOTAL_SUPPLY, numReversibleBlocks, owner.address);
+
+            const tx = await erc721r.transferFrom(owner.address, addr1.address, tokenId0);
+            blockNumber = tx.blockNumber;
+            await erc721r.transferFrom(owner.address, addr2.address, tokenId1);
+            await erc721r.connect(addr1).transferFrom(addr1.address, addr2.address, tokenId0);
+            await erc721r.transferFrom(owner.address, addr2.address, tokenId2);
+
+            token0Queue = erc721r.getOwnings(tokenId0);
+            token1Queue = erc721r.getOwnings(tokenId1);
+            token2Queue = erc721r.getOwnings(tokenId2);
+
+            expect((await token0Queue).length).to.equal(3);
+            expect((await token1Queue).length).to.equal(2);
+            expect((await token2Queue).length).to.equal(2);
+
+            let t = 0;
+            const nextThreshold = blockNumber + numReversibleBlocks;
+            while (t <= nextThreshold) {
+                t = await erc721r.connect(addr2).transferFrom(addr2.address, addr2.address, tokenId1);
+                t = t.blockNumber;
+            }
+        });
+
+        it('Freeze does not work for expired transaction', async () => {
+            await expect(erc721r.freeze(owner.address, addr1.address, tokenId0, blockNumber, 0)).to.be.revertedWith('ERC721R: specified transaction is no longer reversible.');
+        });
+
+        it("Cleans when parameters are correct", async function () {
+            const clean = erc721r.clean([tokenId0, tokenId2]);
+            await clean;
+            // clean all but the current owner
+            expect((await erc721r.getOwnings(tokenId0)).length).to.equal(1);
+            expect((await erc721r.getOwnings(tokenId2)).length).to.equal(1);
+        });
     });
 });
