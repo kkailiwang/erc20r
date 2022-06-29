@@ -16,6 +16,8 @@ describe("ERC20R", function () {
         // time. It receives a callback, which can be async.
         beforeEach(async function () {
             // Get the ContractFactory and Signers here.
+            // await network.provider.send("evm_setAutomine", [false]);
+            // await network.provider.send("evm_setIntervalMining", [100]);
             ExampleERC20R = await ethers.getContractFactory("ExampleERC20R");
             [owner, addr1, addr2, addr3] = await ethers.getSigners();
 
@@ -271,12 +273,8 @@ describe("ERC20R", function () {
             expect((await ownerSpends).length).to.equal(3);
             expect((await addr1Spends).length).to.equal(1);
 
-            let t = 0;
             const nextThreshold = (epoch + 1) * DELTA;
-            while (t < nextThreshold) {
-                t = await erc20r.connect(addr2).transfer(addr2.address, 1);
-                t = t.blockNumber;
-            }
+            await hre.network.provider.send("hardhat_mine", ['0x' + (nextThreshold - blockNumber).toString(16)]);
         })
 
         it('Freeze does not work for expired transaction', async () => {
@@ -292,9 +290,9 @@ describe("ERC20R", function () {
 
             expect((await ownerSpends).length).to.equal(3);
             expect((await addr1Spends).length).to.equal(1);
-            const clean = erc20r.clean([owner.address, addr1.address, addr2.address], epoch)
+            const clean = erc20r.clean([owner.address, addr1.address], epoch)
 
-            await clean;
+            const t = await clean;
             expect((await erc20r.getSpenditures(epoch, owner.address)).length).to.equal(0);
             expect((await erc20r.getSpenditures(epoch, addr1.address)).length).to.equal(0);
 
@@ -304,8 +302,8 @@ describe("ERC20R", function () {
 
         it("Fails if doesn't include all addresses for epoch", async function () {
             const epoch = Math.floor(blockNumber / DELTA);
-            await expect(erc20r.clean([owner.address, addr1.address], epoch)).to.be.revertedWith("ERC20R: Must clear the entire block Epoch's data at once.");
-            await expect(erc20r.clean([owner.address, addr2.address, addr3.address], epoch)).to.be.revertedWith("ERC20R: addresses to clean for block Epoch does not match the actual data storage.");
+            await expect(erc20r.clean([owner.address], epoch)).to.be.revertedWith("ERC20R: Must clear the entire block Epoch's data at once.");
+            await expect(erc20r.clean([owner.address, addr2.address], epoch)).to.be.revertedWith("ERC20R: addresses to clean for block Epoch does not match the actual data storage.");
 
         });
 

@@ -111,12 +111,8 @@ describe("ERC20R Offchain scripts", function () {
                 expect((await ownerSpends).length).to.equal(3);
                 expect((await addr1Spends).length).to.equal(1);
 
-                let t = 0;
                 const nextThreshold = (epoch + 1) * DELTA;
-                while (t < nextThreshold) {
-                    t = await erc20r.connect(addr2).transfer(addr2.address, 1);
-                    t = t.blockNumber;
-                }
+                await hre.network.provider.send("hardhat_mine", ['0x' + (nextThreshold - blockNumber).toString(16)]);
             })
 
 

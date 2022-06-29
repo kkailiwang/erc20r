@@ -48,7 +48,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _;
     }
 
-    uint256 public DELTA = 100;
+    uint256 public DELTA = 1000;
     uint256 public NUM_REVERSIBLE_BLOCKS;
 
     mapping(address => mapping(address => uint256)) private _allowances;

@@ -103,12 +103,9 @@ describe("ERC721R Offchain scripts", function () {
                 expect((await token1Queue).length).to.equal(2);
                 expect((await token2Queue).length).to.equal(2);
 
-                let t = 0;
                 const nextThreshold = blockNumber + numReversibleBlocks;
-                while (t <= nextThreshold) {
-                    t = await erc721r.connect(addr2).transferFrom(addr2.address, addr2.address, tokenId1);
-                    t = t.blockNumber;
-                }
+                //makes it automatically mine for you 
+                await hre.network.provider.send("hardhat_mine", ['0x' + (nextThreshold - blockNumber).toString(16)]);
             });
 
             it("Cleans when parameters are correct", async function () {
