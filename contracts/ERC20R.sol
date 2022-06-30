@@ -262,13 +262,12 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 lowerBound
     ) internal returns (uint256 ret) {
         uint256 len = end - begin;
-        if (
-            len == 0 ||
-            (len == 1 &&
-                _spenditures[epoch][from][begin].block_number < lowerBound)
-        ) {
+        if (len == 0) {
             return
-                0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+                _spenditures[epoch][from].length > begin &&
+                    _spenditures[epoch][from][begin].block_number >= lowerBound
+                    ? begin
+                    : 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
         }
         uint256 mid = begin + len / 2;
         uint256 v = _spenditures[epoch][from][mid].block_number;
@@ -279,8 +278,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         else {
             while (
                 mid > 0 &&
-                mid - 1 >= 0 &&
-                _spenditures[epoch][from][mid - 1].block_number > lowerBound
+                _spenditures[epoch][from][mid - 1].block_number == lowerBound
             ) {
                 mid--;
             }

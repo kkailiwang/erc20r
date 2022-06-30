@@ -212,6 +212,7 @@ describe("ERC20R", function () {
 
             it("Freeze works on a multi-node suspect graph", async function () {
                 expect(freeze).to.emit('FreezeSuccessful');
+                await freeze;
                 await ensureMine(manualMine);
 
                 const frozen1 = await erc20r.frozen(addr1.address);
