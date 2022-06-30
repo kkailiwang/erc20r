@@ -687,6 +687,14 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
     {
         return _owners[tokenId].getFirst();
     }
+
+    function owningGetLength(uint256 tokenId)
+        external
+        view
+        returns (uint256)
+    {
+        return _owners[tokenId].length();
+    }
 }
 
 library SharedStructs {
