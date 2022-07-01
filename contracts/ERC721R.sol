@@ -67,7 +67,7 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         NUM_REVERSIBLE_BLOCKS = reversiblePeriod_;
         _governanceContract = governanceContract_;
         for (uint256 i = 0; i < totalSupply; i++) {
-            _owners[i] = new OwningQueue();
+            _owners[i] = new OwningQueue(); //initialize owningQueues
         }
     }
 
@@ -209,7 +209,7 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
                 "ERC721R: specified transaction is no longer reversible."
             );
         }
-        
+
         //verify that this transaction happened
         uint256 tokenOwningsFirst = _owners[tokenId].getFirst();
         uint256 tokenOwningsLength = _owners[tokenId].getLast();
@@ -680,19 +680,11 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         return _owners[tokenId].getOwningQueueArr();
     }
 
-    function owningGetFirst(uint256 tokenId)
-        external
-        view
-        returns (uint256)
-    {
+    function owningGetFirst(uint256 tokenId) external view returns (uint256) {
         return _owners[tokenId].getFirst();
     }
 
-    function owningGetLength(uint256 tokenId)
-        external
-        view
-        returns (uint256)
-    {
+    function owningGetLength(uint256 tokenId) external view returns (uint256) {
         return _owners[tokenId].length();
     }
 }
