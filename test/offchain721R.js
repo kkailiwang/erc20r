@@ -34,7 +34,7 @@ describe("ERC721R Offchain scripts", function () {
                 blockNumber = tx.blockNumber;
 
                 const foundI = await findIndex(from, addr1.address, blockNumber, tokenId, erc721r);
-                await erc721r.freeze(owner.address, addr1.address, tokenId, blockNumber, foundI);
+                await erc721r.freeze(tokenId, foundI);
                 const logs = await erc721r.queryFilter('FreezeSuccessful');
                 expect(logs.length).to.equal(1);
             });
@@ -54,7 +54,7 @@ describe("ERC721R Offchain scripts", function () {
                     await erc721r.connect(addr2).transferFrom(addr2.address, addr2.address, tokenId);
                 }
                 const foundI = await findIndex(from, addr2.address, blockNumber, tokenId, erc721r);
-                await erc721r.freeze(from, addr2.address, tokenId, blockNumber, foundI);
+                await erc721r.freeze(tokenId, foundI);
                 const logs = await erc721r.queryFilter('FreezeSuccessful');
                 expect(logs.length).to.equal(1);
             });
@@ -69,7 +69,7 @@ describe("ERC721R Offchain scripts", function () {
                 blockNumber = tx.blockNumber;
 
                 const foundI = await findIndex(from, addr1.address, blockNumber, tokenId, erc721r);
-                await erc721r.freeze(owner.address, addr1.address, tokenId, blockNumber, foundI);
+                await erc721r.freeze(tokenId, foundI);
                 const logs = await erc721r.queryFilter('FreezeSuccessful');
                 expect(logs.length).to.equal(1);
             });

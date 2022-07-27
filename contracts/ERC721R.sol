@@ -197,33 +197,27 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
      * @dev freeze
      */
     function freeze(
-        address from,
-        address to,
         uint256 tokenId,
-        uint256 blockNumber,
         uint256 index
     ) public onlyGovernance returns (bool successful) {
-        if (block.number > NUM_REVERSIBLE_BLOCKS) {
-            require(
-                blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
-                "ERC721R: specified transaction is no longer reversible."
-            );
-        }
-
-        //verify that this transaction happened
+        // verify that index is valid
         uint256 tokenOwningsFirst = _owners[tokenId].getFirst();
         uint256 tokenOwningsLength = _owners[tokenId].getLast();
-
         unchecked {
             require(
                 index >= tokenOwningsFirst &&
                     index < tokenOwningsFirst + tokenOwningsLength - 1,
                 "ERC721R: Verification of specified transaction failed."
             );
+        }
+        address from = _owners[tokenId].get(index).owner;
+        address to = _owners[tokenId].get(index + 1).owner;
+        uint256 blockNumber = _owners[tokenId].get(index + 1).startBlock;
+
+        if (block.number > NUM_REVERSIBLE_BLOCKS) {
             require(
-                _owners[tokenId].get(index).owner == from &&
-                    _owners[tokenId].get(index + 1).owner == to,
-                "ERC721R: Index does not match the contested ownership."
+                blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
+                "ERC721R: specified transaction is no longer reversible."
             );
         }
 
@@ -232,7 +226,7 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
         return true;
     }
 
-    function reverse(uint256 tokenId, address original_owner)
+    function reverse(uint256 tokenId, uint256 index)
         external
         onlyGovernance
         returns (bool successful)
@@ -242,10 +236,13 @@ contract ERC721R is Context, ERC165, IERC721, IERC721Metadata {
             address owner = _owners[tokenId]
                 .get(_owners[tokenId].getLast() - 1)
                 .owner;
+            address original_owner = _owners[tokenId]
+                .get(index)
+                .owner;
             _frozen[tokenId] = false;
             _transfer(owner, original_owner, tokenId);
+            emit ReverseSuccessful(tokenId, original_owner);
         }
-        emit ReverseSuccessful(tokenId, original_owner);
         return true;
     }
 

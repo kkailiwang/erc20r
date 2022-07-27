@@ -54,8 +54,6 @@ describe("ERC721R", function () {
         });
 
         describe("One-node suspect graph", function () {
-
-            let blockNumber;
             const tokenId = 0;
             const index = 1;
 
@@ -65,11 +63,10 @@ describe("ERC721R", function () {
                 let tx = await erc721r.connect(addr1).transferFrom(addr1.address, addr3.address, tokenId);
                 await ensureMine(manualMine);
                 tx = await hre.network.provider.send('eth_getTransactionByHash', [tx.hash]);
-                blockNumber = tx.blockNumber;
             });
 
             it("Freeze works on a one-node suspect graph", async function () {
-                await erc721r.freeze(addr1.address, addr3.address, tokenId, blockNumber, index);
+                await erc721r.freeze(tokenId, index);
                 await ensureMine(manualMine);
                 const frozen0 = await erc721r._frozen(tokenId);
                 await ensureMine(manualMine);
@@ -77,21 +74,18 @@ describe("ERC721R", function () {
             });
 
             it("Freeze fails if wrong index provided, or out of range", async () => {
-                const freeze1 = erc721r.freeze(addr1.address, addr3.address, tokenId, blockNumber, 0);
-                const freeze2 = erc721r.freeze(addr1.address, addr3.address, tokenId, blockNumber, 10);
+                const freeze = erc721r.freeze(tokenId, 10);
                 if (manualMine) {
-                    await freeze1;
-                    await freeze2;
+                    await freeze;
                     await ensureMine(manualMine)
                     expect((await erc721r.queryFilter('FreezeSuccessful')).length).to.equal(0);
                 } else {
-                    await expect(freeze1).to.be.revertedWith("ERC721R: Index does not match the contested ownership.");
-                    await expect(freeze2).to.be.revertedWith("ERC721R: Verification of specified transaction failed.");
+                    await expect(freeze).to.be.revertedWith("ERC721R: Verification of specified transaction failed.");
                 }
             });
 
             it("Account cannot transfer frozen token", async function () {
-                await erc721r.freeze(addr1.address, addr3.address, tokenId, blockNumber, index);
+                await erc721r.freeze(tokenId, index);
                 await ensureMine(manualMine);
                 //addr1 is not allowed to send tokens now.
                 if (manualMine) {
@@ -131,14 +125,14 @@ describe("ERC721R", function () {
             })
 
             it("Reverse works", async function () {
-                const freeze = erc721r.freeze(addr1.address, addr3.address, tokenId, blockNumber, index);
+                const freeze = erc721r.freeze(tokenId, index);
                 expect(freeze).to.emit(erc721r, 'FreezeSuccessful');
                 await freeze;
                 await ensureMine(manualMine);
                 const freezes = await erc721r.queryFilter('FreezeSuccessful');
                 expect(freezes.length).to.equal(1);
                 const victim = freezes[0].args.from;
-                const reverse = erc721r.reverse(tokenId, victim);
+                const reverse = erc721r.reverse(tokenId, index);
                 expect(reverse).to.emit(erc721r, 'ReverseSuccessful');
                 await reverse;
                 await ensureMine(manualMine);
@@ -147,7 +141,7 @@ describe("ERC721R", function () {
             });
 
             it("Reject Reverse works", async function () {
-                const freeze = erc721r.freeze(addr1.address, addr3.address, tokenId, blockNumber, index);
+                const freeze = erc721r.freeze(tokenId, index);
                 expect(freeze).to.emit(erc721r, 'FreezeSuccessful');
                 await freeze;
                 await ensureMine(manualMine);
@@ -166,7 +160,6 @@ describe("ERC721R", function () {
         });
 
         describe("multi-node graph", function () {
-            let blockNumber;
             const tokenId = 0;
             const index = 0;
             let freeze;
@@ -175,10 +168,9 @@ describe("ERC721R", function () {
                 let tx = await erc721r.transferFrom(owner.address, addr1.address, tokenId);
                 await ensureMine(manualMine);
                 tx = await hre.network.provider.send('eth_getTransactionByHash', [tx.hash]);
-                blockNumber = tx.blockNumber;
                 await erc721r.connect(addr1).transferFrom(addr1.address, addr3.address, tokenId);
                 await ensureMine(manualMine);
-                freeze = erc721r.freeze(owner.address, addr1.address, tokenId, blockNumber, index);
+                freeze = erc721r.freeze(tokenId, index);
                 await ensureMine(manualMine);
                 expect(freeze).to.emit('FreezeSuccessful');
                 await freeze;
@@ -194,7 +186,7 @@ describe("ERC721R", function () {
                 const freezes = await erc721r.queryFilter('FreezeSuccessful');
                 await ensureMine(manualMine);
                 expect(freezes.length).to.equal(1);
-                const reverse = erc721r.reverse(tokenId, owner.address);
+                const reverse = erc721r.reverse(tokenId, 0);
                 expect(reverse).to.emit(erc721r, 'ReverseSuccessful');
                 await reverse;
                 await ensureMine(manualMine);
@@ -290,7 +282,7 @@ describe("ERC721R", function () {
         });
 
         it('Freeze does not work for expired transaction', async () => {
-            await expect(erc721r.freeze(owner.address, addr1.address, tokenId0, blockNumber, 0)).to.be.revertedWith('ERC721R: specified transaction is no longer reversible.');
+            await expect(erc721r.freeze(tokenId0, 0)).to.be.revertedWith('ERC721R: specified transaction is no longer reversible.');
         });
 
         it("Cleans when parameters are correct", async function () {
