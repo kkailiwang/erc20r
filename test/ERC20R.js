@@ -62,8 +62,7 @@ describe("ERC20R", function () {
         });
 
         describe("One-node suspect graph", function () {
-
-            let blockNumber;
+            let epoch;
             const amount = 200;
             const index = 1;
 
@@ -73,12 +72,12 @@ describe("ERC20R", function () {
                 await ensureMine(manualMine);
 
                 tx = await hre.network.provider.send('eth_getTransactionByHash', [tx.hash]);
-                blockNumber = tx.blockNumber;
-
+                const blockNumber = tx.blockNumber;
+                epoch = Math.floor(blockNumber / DELTA);
             });
 
             it("Freeze works on a one-node suspect graph", async function () {
-                const claimID = await erc20r.freeze(owner.address, addr1.address, amount, blockNumber, index);
+                const claimID = await erc20r.freeze(epoch, owner.address, index);
                 await ensureMine(manualMine);
 
                 const frozen1 = await erc20r.frozen(addr1.address);
@@ -86,22 +85,18 @@ describe("ERC20R", function () {
             });
 
             it("Freeze fails if wrong index provided, or out of range", async () => {
-                const freeze1 = erc20r.freeze(owner.address, addr1.address, amount, blockNumber, 0);
-                const freeze2 = erc20r.freeze(owner.address, addr1.address, amount, blockNumber, 10);
+                const freeze = erc20r.freeze(epoch, owner.address, 10);
                 if (manualMine) {
-                    await freeze1;
-                    await freeze2;
+                    await freeze;
                     await ensureMine(manualMine)
                     expect((await erc20r.queryFilter('FreezeSuccessful')).length).to.equal(0);
                 } else {
-                    await expect(freeze1).to.be.revertedWith("ERC20R: index given does not match spenditure");
-                    await expect(freeze2).to.be.revertedWith("ERC20R: Invalid index provided.")
+                    await expect(freeze).to.be.revertedWith("ERC20R: Invalid index provided.");
                 }
-
-            })
+            });
 
             it("Account can spend unfrozen money but can't spend frozen money", async function () {
-                const claimID = await erc20r.freeze(owner.address, addr1.address, amount, blockNumber, index);
+                const claimID = await erc20r.freeze(epoch, owner.address, index);
                 await ensureMine(manualMine);
 
                 //addr1 is not allowed to send money now. 
@@ -116,7 +111,6 @@ describe("ERC20R", function () {
                         erc20r.connect(addr1).transfer(addr2.address, 1)
                     ).to.be.revertedWith("ERC20R: Cannot spend frozen money in account.");
                 }
-
 
                 //can still receive payments 
                 await erc20r.transfer(addr1.address, amount);
@@ -143,7 +137,7 @@ describe("ERC20R", function () {
             })
 
             it("Reverse works", async function () {
-                const freeze = erc20r.freeze(owner.address, addr1.address, amount, blockNumber, 1);
+                const freeze = erc20r.freeze(epoch, owner.address, 1);
 
                 expect(freeze).to.emit(erc20r, 'FreezeSuccessful');
                 const tx = await freeze;
@@ -165,7 +159,7 @@ describe("ERC20R", function () {
             });
 
             it("Reject Reverse works", async function () {
-                const freeze = erc20r.freeze(owner.address, addr1.address, amount, blockNumber, 1);
+                const freeze = erc20r.freeze(epoch, owner.address, 1);
 
                 expect(freeze).to.emit(erc20r, 'FreezeSuccessful');
                 const tx = await freeze;
@@ -185,12 +179,10 @@ describe("ERC20R", function () {
                 expect(balance).to.equal(TOTAL_SUPPLY - 100 - amount);
                 expect(balance1).to.equal(amount);
             });
-
-
         });
 
         describe("multi-node graph ", function () {
-            let blockNumber;
+            let epoch;
             const amount = 200;
             const index = 1;
             let freeze;
@@ -201,14 +193,14 @@ describe("ERC20R", function () {
                 let tx = await erc20r.transfer(addr1.address, amount);
                 await ensureMine(manualMine);
                 tx = await hre.network.provider.send('eth_getTransactionByHash', [tx.hash]);
-                blockNumber = tx.blockNumber;
+                const blockNumber = tx.blockNumber;
+                epoch = Math.floor(blockNumber / DELTA);
                 await erc20r.connect(addr1).transfer(addr2.address, amount / 2);
                 await ensureMine(manualMine);
 
-                freeze = erc20r.freeze(owner.address, addr1.address, amount, blockNumber, index);
+                freeze = erc20r.freeze(epoch, owner.address, index);
                 await ensureMine(manualMine);
-
-            })
+            });
 
             it("Freeze works on a multi-node suspect graph", async function () {
                 expect(freeze).to.emit('FreezeSuccessful');
@@ -226,7 +218,7 @@ describe("ERC20R", function () {
         })
 
         describe("Unequal weights in multi-node graph ", function () {
-            let blockNumber;
+            let epoch;
             const amount = 200;
             const index = 1;
             let freeze;
@@ -238,17 +230,16 @@ describe("ERC20R", function () {
                 await ensureMine(manualMine);
                 tx = await hre.network.provider.send('eth_getTransactionByHash', [tx.hash]);
 
-                blockNumber = tx.blockNumber;
+                const blockNumber = tx.blockNumber;
+                epoch = Math.floor(blockNumber / DELTA);
                 await erc20r.connect(addr1).transfer(addr2.address, amount / 4);
                 await erc20r.connect(addr1).transfer(addr3.address, amount / 2);
                 await ensureMine(manualMine);
 
-                freeze = erc20r.freeze(owner.address, addr1.address, amount, blockNumber, index);
-
-            })
+                freeze = erc20r.freeze(epoch, owner.address, index);
+            });
 
             it("Freeze works on a larger suspect graph with unequal weights", async function () {
-
                 //addr1 should have amount / 2
                 //addr2 should have 1/4 amount 
                 //addr3 should have amount / 2
@@ -271,7 +262,6 @@ describe("ERC20R", function () {
                 expect(frozen1).to.equal(amount / 2);
                 expect(frozen2).to.equal(Math.floor(amount / 6));
                 expect(frozen3).to.equal(Math.floor(amount / 3));
-
             });
 
             it("Reverse works", async () => {
@@ -293,7 +283,6 @@ describe("ERC20R", function () {
             })
 
             it('fails if still in reversible time period', async () => {
-                const epoch = Math.floor(blockNumber / DELTA)
                 if (manualMine) {
                     const oldTransfers = await erc20r.queryFilter('Transfer');
                     await erc20r.clean([owner.address, addr1.address], epoch);
@@ -301,10 +290,9 @@ describe("ERC20R", function () {
                     expect(newTransfers.length - oldTransfers.length).to.equal(0);
                 } else {
                     await expect(erc20r.clean([owner.address, addr1.address], epoch)).to.be.revertedWith("ERC20-R: Block Epoch is not allowed to be cleared yet.");
-
                 }
-            })
-        })
+            });
+        });
     }
 
     describe("Reasonable reversible period environment", function () {
@@ -338,30 +326,26 @@ describe("ERC20R", function () {
                 // to our Signer's owner.
                 expect(await erc20r.balanceOf(owner.address)).to.equal(TOTAL_SUPPLY);
             });
-
         });
 
         describe("each transaction is in a different block", function () {
             functionalTests(false);
-        })
+        });
 
         describe('Some transactions are in the same block', function () {
             before(async function () {
                 await network.provider.send("evm_setAutomine", [false]);
                 await network.provider.send("evm_setIntervalMining", [50]);
-            })
+            });
             functionalTests(true);
-            after(async () => await network.provider.send("evm_setAutomine", [true]))
-
-        })
-    })
-
-
-
+            after(async () => await network.provider.send("evm_setAutomine", [true]));
+        });
+    });
 
     describe("Some transactions are out of reversible time period", function () {
         let blockNumber;
         const amount = 100;
+        let epoch;
         beforeEach(async function () {
             // Get the ContractFactory and Signers here.
             ExampleERC20R = await ethers.getContractFactory("ExampleERC20R");
@@ -379,7 +363,7 @@ describe("ERC20R", function () {
             await erc20r.transfer(addr2.address, 100);
             await erc20r.transfer(addr3.address, 100);
             await erc20r.connect(addr1).transfer(addr2.address, 50);
-            const epoch = Math.floor(blockNumber / DELTA);
+            epoch = Math.floor(blockNumber / DELTA);
 
             const ownerSpends = erc20r.getSpenditures(epoch, owner.address);
             const addr1Spends = erc20r.getSpenditures(epoch, addr1.address);
@@ -389,13 +373,12 @@ describe("ERC20R", function () {
 
             const nextThreshold = (epoch + 1) * DELTA;
             await hre.network.provider.send("hardhat_mine", ['0x' + (nextThreshold - blockNumber).toString(16)]);
-        })
+        });
 
         it('Freeze does not work for expired transaction', async () => {
-            freeze = erc20r.freeze(owner.address, addr1.address, amount, blockNumber, 0);
+            freeze = erc20r.freeze(epoch, owner.address, 0);
             await expect(freeze).to.be.revertedWith('ERC20R: specified transaction is no longer reversible.');
-
-        })
+        });
 
         it("Cleans when parameters are correct", async function () {
             const epoch = Math.floor(blockNumber / DELTA);
@@ -418,7 +401,6 @@ describe("ERC20R", function () {
             const epoch = Math.floor(blockNumber / DELTA);
             await expect(erc20r.clean([owner.address], epoch)).to.be.revertedWith("ERC20R: Must clear the entire block Epoch's data at once.");
             await expect(erc20r.clean([owner.address, addr2.address], epoch)).to.be.revertedWith("ERC20R: addresses to clean for block Epoch does not match the actual data storage.");
-
         });
 
     })

@@ -288,37 +288,28 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
 
     //amount should be in wei
     function freeze(
+        uint256 epoch,
         address from,
-        address to,
-        uint256 amount,
-        uint256 blockNumber,
         uint256 index
     ) public onlyGovernance returns (bytes32 claimID) {
+        // get transaction info
+        uint256 epochLength = _spenditures[epoch][from].length;
+        require(
+            index >= 0 && index < epochLength,
+            "ERC20R: Invalid index provided."
+        );
+        Spenditure storage s = _spenditures[epoch][from][index];
+        uint256 blockNumber = s.block_number;
+        address to = s.to;
+        uint256 amount = s.amount;
         if (block.number > NUM_REVERSIBLE_BLOCKS) {
             require(
                 blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
                 "ERC20R: specified transaction is no longer reversible."
             );
         }
-        require(
-            blockNumber <= block.number,
-            "ERC20R: specified transaction block number is greater than the current block number."
-        );
-
-        //verify that this transaction happened
-        uint256 epoch = blockNumber / DELTA;
-        uint256 epochLength = _spenditures[epoch][from].length;
-        require(
-            index >= 0 && index < epochLength,
-            "ERC20R: Invalid index provided."
-        );
-        require(
-            _spenditures[epoch][from][index].to == to &&
-                _spenditures[epoch][from][index].amount == amount,
-            "ERC20R: index given does not match spenditure"
-        );
+        
         //hash the spenditure; this is the claim hash now. what about two identical
-        Spenditure storage s = _spenditures[epoch][from][index];
         claimID = keccak256(abi.encode(s));
         _freeze_helper(s, claimID);
         emit FreezeSuccessful(from, to, amount, blockNumber, index, claimID);

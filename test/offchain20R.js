@@ -26,24 +26,24 @@ describe("ERC20R Offchain scripts", function () {
         });
 
         describe("findIndex", function () {
-            let blockNumber;
+            let epoch;
             const amount = 200;
             const index = 1;
             let from;
             beforeEach(async function () {
-            })
+            });
 
             it('findIndex works when index is 0', async () => {
                 const tx = await erc20r.transfer(addr1.address, amount);
                 from = tx.from;
-                blockNumber = tx.blockNumber;
+                const blockNumber = tx.blockNumber;
+                epoch = Math.floor(blockNumber / DELTA);
 
                 const foundI = await findIndex(from, addr1.address, blockNumber, amount, erc20r);
-                await erc20r.freeze(owner.address, addr1.address, amount, blockNumber, foundI);
+                await erc20r.freeze(epoch, owner.address, foundI);
                 const logs = await erc20r.queryFilter('FreezeSuccessful');
                 expect(logs.length).to.equal(1);
             });
-
 
             it('findIndex works when index is in middle of spenditures', async () => {
                 for (let i = 0; i < 10; i++) {
@@ -52,12 +52,14 @@ describe("ERC20R Offchain scripts", function () {
 
                 const tx = await erc20r.transfer(addr1.address, amount);
                 from = tx.from;
-                blockNumber = tx.blockNumber;
+                const blockNumber = tx.blockNumber;
+                epoch = Math.floor(blockNumber / DELTA);
+
                 for (let i = 0; i < 10; i++) {
                     await erc20r.transfer(addr1.address, 1);
                 }
                 const foundI = await findIndex(from, addr1.address, blockNumber, amount, erc20r);
-                await erc20r.freeze(owner.address, addr1.address, amount, blockNumber, foundI);
+                await erc20r.freeze(epoch, owner.address, foundI);
                 const logs = await erc20r.queryFilter('FreezeSuccessful');
                 expect(logs.length).to.equal(1);
 
@@ -70,17 +72,15 @@ describe("ERC20R Offchain scripts", function () {
 
                 const tx = await erc20r.transfer(addr1.address, amount);
                 from = tx.from;
-                blockNumber = tx.blockNumber;
+                const blockNumber = tx.blockNumber;
+                epoch = Math.floor(blockNumber / DELTA);
 
                 const foundI = await findIndex(from, addr1.address, blockNumber, amount, erc20r);
-                await erc20r.freeze(owner.address, addr1.address, amount, blockNumber, foundI);
+                await erc20r.freeze(epoch, owner.address, foundI);
                 const logs = await erc20r.queryFilter('FreezeSuccessful');
                 expect(logs.length).to.equal(1);
-
             });
-
-
-        })
+        });
 
 
         describe("Clean", function () {
