@@ -151,6 +151,29 @@ describe("ERC20R", function () {
                         erc20r.connect(addr1).burn(amount)
                     ).to.be.revertedWith("ERC20R: burn amount exceeds unfrozen balance");
                 }
+
+                //can still receive payments 
+                await erc20r.transfer(addr1.address, amount);
+
+                //can burn the additional received amount
+                await erc20r.connect(addr1).burn(amount / 2)
+                await ensureMine(manualMine);
+
+                expect(await erc20r.balanceOf(addr1.address)).to.equal(3 * amount / 2)
+
+                //addr1 is not allowed to burn extra amount
+
+                if (manualMine) {
+                    const oldTransfers = await erc20r.queryFilter('Transfer');
+                    let newtx = await erc20r.connect(addr1).burn(amount);
+                    await ensureMine(manualMine);
+                    const newTransfers = await erc20r.queryFilter('Transfer');
+                    expect(newTransfers.length - oldTransfers.length).to.equal(0);
+                } else {
+                    await expect(
+                        erc20r.connect(addr1).burn(amount)
+                    ).to.be.revertedWith("ERC20R: burn amount exceeds unfrozen balance");
+                }
             });
 
             it("Reverse works", async function () {

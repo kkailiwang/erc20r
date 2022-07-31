@@ -576,7 +576,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 accountBalance = _balances[account] - frozen[account];
         require(accountBalance >= amount, "ERC20R: burn amount exceeds unfrozen balance");
         unchecked {
-            _balances[account] = accountBalance - amount;
+            _balances[account] = _balances[account] - amount;
         }
         _totalSupply -= amount;
 
