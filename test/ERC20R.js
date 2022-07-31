@@ -1,3 +1,4 @@
+const { inputToConfig } = require("@ethereum-waffle/compiler");
 const { expect } = require("chai");
 const TOTAL_SUPPLY = 1000;
 
@@ -57,8 +58,6 @@ describe("ERC20R", function () {
                 const spenditures1 = await erc20r.getSpenditures(epoch, addr1.address);
                 expect(spenditures1.length).to.equal(1);
             });
-
-
         });
 
         describe("One-node suspect graph", function () {
@@ -134,7 +133,25 @@ describe("ERC20R", function () {
                         erc20r.connect(addr1).transfer(addr2.address, amount)
                     ).to.be.revertedWith("ERC20R: Cannot spend frozen money in account.");
                 }
-            })
+            });
+
+            it("Account can burn unfrozen money but cannot burn frozen money.", async function (){
+                const claimID = await erc20r.freeze(epoch, owner.address, index);
+                await ensureMine(manualMine);
+
+                //addr1 is not allowed to burn money now. 
+                if (manualMine) {
+                    const oldTransfers = await erc20r.queryFilter('Transfer');
+                    let newtx = await erc20r.connect(addr1).burn(amount);
+                    await ensureMine(manualMine);
+                    const newTransfers = await erc20r.queryFilter('Transfer');
+                    expect(newTransfers.length - oldTransfers.length).to.equal(0);
+                } else {
+                    await expect(
+                        erc20r.connect(addr1).burn(amount)
+                    ).to.be.revertedWith("ERC20R: burn amount exceeds unfrozen balance");
+                }
+            });
 
             it("Reverse works", async function () {
                 const freeze = erc20r.freeze(epoch, owner.address, 1);

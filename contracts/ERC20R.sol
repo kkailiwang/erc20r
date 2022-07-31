@@ -550,6 +550,14 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     }
 
     /**
+    * @dev Destroys `amount` tokens from the caller.
+    *
+    */
+    function burn(uint256 amount) public {
+        _burn(_msgSender(), amount);
+    }
+
+    /**
      * @dev Destroys `amount` tokens from `account`, reducing the
      * total supply.
      *
@@ -558,15 +566,15 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
      * Requirements:
      *
      * - `account` cannot be the zero address.
-     * - `account` must have at least `amount` tokens.
+     * - `account` must have at least `amount` unfrozen tokens.
      */
     function _burn(address account, uint256 amount) internal virtual {
-        require(account != address(0), "ERC20: burn from the zero address");
+        require(account != address(0), "ERC20R: burn from the zero address");
 
         _beforeTokenTransfer(account, address(0), amount);
 
-        uint256 accountBalance = _balances[account];
-        require(accountBalance >= amount, "ERC20: burn amount exceeds balance");
+        uint256 accountBalance = _balances[account] - frozen[account];
+        require(accountBalance >= amount, "ERC20R: burn amount exceeds unfrozen balance");
         unchecked {
             _balances[account] = accountBalance - amount;
         }
