@@ -1,4 +1,3 @@
-const { inputToConfig } = require("@ethereum-waffle/compiler");
 const { expect } = require("chai");
 const TOTAL_SUPPLY = 1000;
 
@@ -63,10 +62,13 @@ describe("ERC20R", function () {
         describe("One-node suspect graph", function () {
             let epoch;
             const amount = 200;
+            const amountToAddr3 = 100;
             const index = 1;
+            const indexToAddr3 = 0;
+            const index3To2 = 3;
 
             beforeEach(async function () {
-                await erc20r.transfer(addr3.address, 100);
+                await erc20r.transfer(addr3.address, amountToAddr3);
                 let tx = await erc20r.transfer(addr1.address, amount);
                 await ensureMine(manualMine);
 
@@ -174,6 +176,20 @@ describe("ERC20R", function () {
                         erc20r.connect(addr1).burn(amount)
                     ).to.be.revertedWith("ERC20R: burn amount exceeds unfrozen balance");
                 }
+            });
+
+            it("Burning reduces the amount accountable.", async function (){
+                // make a couple of more transactions from address 3 to 2
+                await erc20r.transfer(addr3.address, 100);
+                await erc20r.connect(addr3).transfer(addr2.address, 50);
+                // address 3 burns the same amount as stolen
+                await erc20r.connect(addr3).burn(amountToAddr3);
+                await ensureMine(manualMine);
+                const claimID = await erc20r.freeze(epoch, owner.address, indexToAddr3);
+                
+                // since address 3 has burned, address 2 should not be frozen
+                const frozenAddr2 = await erc20r.frozen(addr2.address);
+                expect(frozenAddr2).to.equal(0);
             });
 
             it("Reverse works", async function () {

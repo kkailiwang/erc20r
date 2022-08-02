@@ -185,6 +185,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         );
         uint256 n = 0;
         sum = 0;
+        uint256 burned = 0;
 
         uint256 lastEpoch = block.number / DELTA;
         if (
@@ -206,22 +207,37 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         ) {
             for (index; index < startEpochLength; index++) {
                 Spenditure memory curr = _spenditures[startEpoch][from][index];
-                suspects[counter] = Spenditure(
-                    curr.from,
-                    curr.to,
-                    curr.amount,
-                    curr.block_number
-                );
-                sum += _spenditures[startEpoch][from][index].amount;
-                counter++;
+                if (curr.to != address(0)){
+                    suspects[counter] = Spenditure(
+                        curr.from,
+                        curr.to,
+                        curr.amount,
+                        curr.block_number
+                    );
+                    sum += _spenditures[startEpoch][from][index].amount;
+                    counter++;
+                } else { // this is a burn transaction
+                    burned += _spenditures[startEpoch][from][index].amount;
+                }
             }
         }
         for (uint256 i = startEpoch + 1; i < lastEpoch; i++) {
             for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
-                suspects[counter] = _spenditures[i][from][j];
-                sum += _spenditures[i][from][j].amount;
-            }
-            counter++;
+                Spenditure memory curr = _spenditures[i][from][j];
+                if (curr.to != address(0)){
+                    suspects[counter] = curr;
+                    sum += _spenditures[i][from][j].amount;
+                    counter++;
+                } else { // this is a burn transaction
+                    burned += curr.amount;
+                }
+            }  
+        }
+
+        if (burned > sum){
+            sum = 0;
+        } else {
+            sum -= burned;
         }
     }
 
@@ -239,17 +255,20 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
                 Spenditure[] memory suspects,
                 uint256 totalAmounts
             ) = _getSuspectTxsFromAddress(s.to, s.block_number + 1);
-            uint256 leftover = s.amount - advBalance;
-            for (uint256 i = 0; i < suspects.length; i++) {
-                //responsible amount is weighted
-                Spenditure memory s_next = Spenditure(
-                    s.from,
-                    suspects[i].to,
-                    (leftover * suspects[i].amount) / totalAmounts,
-                    suspects[i].block_number
-                );
-                _freeze_helper(s_next, claimID);
-            }
+            if (totalAmounts > 0){
+                uint256 leftover = s.amount - advBalance;
+                for (uint256 i = 0; i < suspects.length; i++) {
+                    //responsible amount is weighted
+                    Spenditure memory s_next = Spenditure(
+                        s.from,
+                        suspects[i].to,
+                        (leftover * suspects[i].amount) / totalAmounts,
+                        suspects[i].block_number
+                    );
+                    _freeze_helper(s_next, claimID);
+                }
+            } // possible that one address burns a lot of tokens that totalAmounts <= 0
+            
         }
     }
 
@@ -579,6 +598,11 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             _balances[account] = _balances[account] - amount;
         }
         _totalSupply -= amount;
+
+        uint256 epoch = block.number / DELTA;
+        _spenditures[epoch][account].push(
+            Spenditure(account, address(0), amount, block.number)
+        );
 
         emit Transfer(account, address(0), amount);
 
