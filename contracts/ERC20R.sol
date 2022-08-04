@@ -172,7 +172,10 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
 
     function _getSuspectTxsFromAddress(address from, uint256 startBlock)
         private
-        returns (Spenditure[] memory suspects, uint256 sum)
+        returns (Spenditure[] memory suspects,
+                 uint256 sum,
+                 uint256 burned,
+                 uint256 counter)
     {
         uint256 startEpoch = startBlock / DELTA;
         uint256 startEpochLength = _spenditures[startEpoch][from].length;
@@ -185,7 +188,6 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         );
         uint256 n = 0;
         sum = 0;
-        uint256 burned = 0;
 
         uint256 lastEpoch = block.number / DELTA;
         if (
@@ -199,7 +201,6 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             n += _spenditures[i][from].length;
         }
         suspects = new Spenditure[](n);
-        uint256 counter = 0;
 
         if (
             index !=
@@ -233,12 +234,6 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
                 }
             }  
         }
-
-        if (burned > sum){
-            sum = 0;
-        } else {
-            sum -= burned;
-        }
     }
 
     function _freeze_helper(Spenditure memory s, bytes32 claimID) private {
@@ -253,11 +248,21 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             );
             (
                 Spenditure[] memory suspects,
-                uint256 totalAmounts
+                uint256 totalAmounts,
+                uint256 totalBurned,
+                uint256 validLength
             ) = _getSuspectTxsFromAddress(s.to, s.block_number + 1);
             if (totalAmounts > 0){
                 uint256 leftover = s.amount - advBalance;
-                for (uint256 i = 0; i < suspects.length; i++) {
+                if (leftover >= totalBurned){
+                    leftover -= totalBurned;
+                } else {
+                    return; // all leftover are burned
+                }
+                if (leftover <= 0){
+                    return;
+                }
+                for (uint256 i = 0; i < validLength; i++) {
                     //responsible amount is weighted
                     Spenditure memory s_next = Spenditure(
                         s.from,
