@@ -236,7 +236,10 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         }
     }
 
-    function _freeze_helper(Spenditure memory s, bytes32 claimID) private {
+    /* Alternative freeze helper that tracks suspect fund down in a DFS manner
+       Used together with freezeAlt
+    */
+    function _freeze_helper_alt(Spenditure memory s, bytes32 claimID) private {
         uint256 advBalance = _balances[s.to] - frozen[s.to];
         if (s.amount <= advBalance) {
             frozen[s.to] += s.amount;
@@ -270,7 +273,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
                         (leftover * suspects[i].amount) / totalAmounts,
                         suspects[i].block_number
                     );
-                    _freeze_helper(s_next, claimID);
+                    _freeze_helper_alt(s_next, claimID);
                 }
             } // possible that one address burns a lot of tokens that totalAmounts <= 0
             
@@ -310,8 +313,159 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         }
     }
 
-    //amount should be in wei
+    function _accumulateLength(
+        uint256 epoch,
+        address from,
+        uint256 index
+    ) internal returns (uint128 n){
+        uint256 epochLength = _spenditures[epoch][from].length;
+        require(
+            index >= 0 && index < epochLength,
+            "ERC20R: Invalid index provided."
+        );
+        n++;
+        if (
+            index !=
+            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        ) {
+            for (index; index < _spenditures[epoch][from].length; index++) {
+                address to = _spenditures[epoch][from][index].to;
+                _accumulateLength(epoch, to, index);
+            }
+        }
+        uint256 lastEpoch = block.number / DELTA;
+        for (uint256 i = epoch + 1; i < lastEpoch; i++) {
+            for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
+                address to = _spenditures[i][from][j].to;
+                _accumulateLength(i, to, j);
+            }  
+        }
+    }
+
+    function _getTopologicalOrder(
+        uint256 epoch,
+        address from,
+        uint256 index
+    ) internal returns (address[] memory orderedSuspects) {
+        uint256 n = _accumulateLength(epoch, from, index);
+        Spenditure storage s = _spenditures[epoch][from][index];
+        bytes32[] memory perm_marks = new bytes32[](n);
+        bytes32[] memory temp_marks = new bytes32[](n);
+        Spenditure[] memory orderedSuspects = new Spenditure[](n);
+        _visit(epoch, from, index,
+               perm_marks, temp_marks, orderedSuspects,
+               0, 0, n-1);
+
+    }
+
+    function _visit(
+        uint256 epoch,
+        address from,
+        uint256 index,
+        bytes32[] memory perm_marks,
+        bytes32[] memory temp_marks,
+        Spenditure[] memory orderedSuspects,
+        uint256 numFilledPerm,
+        uint256 numFilledTemp,
+        uint256 susPos
+    ) internal returns (bytes32[] memory r_perm_marks,
+                        bytes32[] memory r_temp_marks,
+                        Spenditure[] memory r_orderedSuspects,
+                        uint256 r_numFilledPerm,
+                        uint256 r_numFilledTemp,
+                        uint256 r_susPos) {
+        r_perm_marks = perm_marks;
+        r_temp_marks = temp_marks;
+        r_orderedSuspects = orderedSuspects;
+        r_numFilledPerm = numFilledPerm;
+        r_numFilledTemp = numFilledTemp;
+        r_susPos = susPos;
+
+        Spenditure storage s = _spenditures[epoch][from][index];
+        bytes32 claimID = keccak256(abi.encode(s));
+        if (_inArray(claimID, r_perm_marks, r_numFilledPerm)) {
+            return (r_perm_marks, r_temp_marks, r_orderedSuspects,
+                    r_numFilledPerm, r_numFilledTemp, r_susPos);
+        }
+        require(
+            !_inArray(claimID, r_temp_marks, r_numFilledTemp),
+            "ERC20R: Graph not a DAG, preprocessing not complete/correct."
+        );
+
+        r_temp_marks[r_numFilledTemp] = claimID;
+        r_numFilledTemp ++;
+        if (
+            index !=
+            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+        ) {
+            for (index; index < _spenditures[epoch][from].length; index++) {
+                address to = _spenditures[epoch][from][index].to;
+                (
+                    r_perm_marks, r_temp_marks, r_orderedSuspects,
+                    r_numFilledPerm, r_numFilledTemp, r_susPos
+                ) = _visit(epoch, to, index,
+                           r_perm_marks, r_temp_marks, r_orderedSuspects,
+                           r_numFilledPerm, r_numFilledTemp, r_susPos);
+            }
+        }
+        uint256 lastEpoch = block.number / DELTA;
+        for (uint256 i = epoch + 1; i < lastEpoch; i++) {
+            for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
+                address to = _spenditures[i][from][j].to;
+                (
+                    r_perm_marks, r_temp_marks, r_orderedSuspects,
+                    r_numFilledPerm, r_numFilledTemp, r_susPos
+                ) = _visit(i, to, index,
+                           r_perm_marks, r_temp_marks, r_orderedSuspects,
+                           r_numFilledPerm, r_numFilledTemp, r_susPos);
+            }  
+        }
+        r_numFilledTemp -= 1;
+        r_temp_marks[r_numFilledTemp] = 0;
+        r_perm_marks[r_numFilledPerm] = claimID;
+        r_numFilledPerm ++;
+        r_orderedSuspects[r_susPos] = s;
+        r_susPos -= 1;
+        return (r_perm_marks, r_temp_marks, r_orderedSuspects,
+                r_numFilledPerm, r_numFilledTemp, r_susPos);
+    }
+
+    function _inArray(
+        bytes32 claimID,
+        bytes32[] memory toSearch,
+        uint256 numFilled
+    ) internal pure returns (bool) {
+        for (uint i = 0; i < numFilled; i++) {
+            if (toSearch[i] == claimID) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /*  Assumes no cycles in spenditures for now
+        amount should be in wei
+    */
     function freeze(
+        uint256 epoch,
+        address from,
+        uint256 index
+    ) public onlyGovernance returns (bytes32 claimID) {
+        // get transaction info
+        uint256 epochLength = _spenditures[epoch][from].length;
+        require(
+            index >= 0 && index < epochLength,
+            "ERC20R: Invalid index provided."
+        );
+        address[] memory orderedSuspects = _getTopologicalOrder(epoch, from, index);
+        
+
+    }
+
+    /*  This is an alternative version of the freeze function.
+        May result in exponential runtime in a trellis graph
+    */
+    function freezeAlt(
         uint256 epoch,
         address from,
         uint256 index
@@ -335,7 +489,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         
         //hash the spenditure; this is the claim hash now. what about two identical
         claimID = keccak256(abi.encode(s));
-        _freeze_helper(s, claimID);
+        _freeze_helper_alt(s, claimID);
         emit FreezeSuccessful(from, to, amount, blockNumber, index, claimID);
     }
 
