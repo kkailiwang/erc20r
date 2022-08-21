@@ -459,6 +459,27 @@ describe("ERC20R", function () {
             await expect(erc20r.clean([owner.address, addr2.address], epoch)).to.be.revertedWith("ERC20R: addresses to clean for block Epoch does not match the actual data storage.");
         });
 
-    })
+    });
+
+    describe("Test topological sort", function () {
+        let epoch = 0;
+        let index = 0;
+
+        beforeEach(async function (){
+            ExampleERC20R = await ethers.getContractFactory("ExampleERC20R");
+            [owner, addr1, addr2, addr3] = await ethers.getSigners();
+            erc20r = await ExampleERC20R.deploy(TOTAL_SUPPLY, 360, owner.address);
+        });
+
+        it("Child comes after parent.", async function () {
+            await erc20r.transfer(addr1.address, 100);
+            await erc20r.transfer(addr2.address, 100);
+            await erc20r.connect(addr2).transfer(addr1.address, 50);
+
+            const orderedSuspects = await erc20r._getTopologicalOrder(epoch, owner.address, index);
+            // console.log(orderedSuspects);
+
+        });
+    });
 
 });

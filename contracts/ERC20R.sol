@@ -66,6 +66,15 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 block_number;
     }
 
+    struct TopoSortInfo {
+        bytes32[] perm_marks;
+        bytes32[] temp_marks;
+        Spenditure[] orderedSuspects;
+        uint256 numFilledPerm;
+        uint256 numFilledTemp;
+        uint256 susPos;
+    }
+
     event ClearedDataInTimeblock(uint256 length, uint256 blockNum);
     event FreezeSuccessful(
         address from,
@@ -316,45 +325,75 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     function _accumulateLength(
         uint256 epoch,
         address from,
-        uint256 index
-    ) internal returns (uint128 n){
+        uint256 index,
+        uint256 prev_n
+    ) internal returns (uint256){
+        uint256 n = prev_n;
         uint256 epochLength = _spenditures[epoch][from].length;
+        n++;
+        if (index >= epochLength){
+            return n;
+        }
         require(
-            index >= 0 && index < epochLength,
+            index >= 0,
             "ERC20R: Invalid index provided."
         );
-        n++;
         if (
             index !=
             0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
         ) {
-            for (index; index < _spenditures[epoch][from].length; index++) {
-                address to = _spenditures[epoch][from][index].to;
-                _accumulateLength(epoch, to, index);
+            for (index+1; index < _spenditures[epoch][from].length; index++) {
+                Spenditure memory s = _spenditures[epoch][from][index];
+                address to = s.to;
+                uint256 childEpoch = s.block_number / DELTA;
+                uint256 childEpochLength = _spenditures[childEpoch][from].length;
+                uint256 childIndex = find_internal(childEpoch,
+                                                   from,
+                                                   0,
+                                                   childEpochLength,
+                                                   s.block_number
+                                                   );
+                n = _accumulateLength(childEpoch, to, childIndex, n);
             }
         }
         uint256 lastEpoch = block.number / DELTA;
         for (uint256 i = epoch + 1; i < lastEpoch; i++) {
             for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
-                address to = _spenditures[i][from][j].to;
-                _accumulateLength(i, to, j);
+                Spenditure memory s = _spenditures[i][from][j];
+                address to = s.to;
+                uint256 childEpoch = s.block_number / DELTA;
+                uint256 childEpochLength = _spenditures[childEpoch][from].length;
+                uint256 childIndex = find_internal(childEpoch,
+                                                   from,
+                                                   0,
+                                                   childEpochLength,
+                                                   s.block_number
+                                                   );
+                n = _accumulateLength(childEpoch, to, childIndex, n);
             }  
         }
+        return n;
     }
 
     function _getTopologicalOrder(
         uint256 epoch,
         address from,
         uint256 index
-    ) internal returns (address[] memory orderedSuspects) {
-        uint256 n = _accumulateLength(epoch, from, index);
+    ) public returns (address[] memory orderedSuspects) {
+        uint256 n = _accumulateLength(epoch, from, index, 0);
         Spenditure storage s = _spenditures[epoch][from][index];
         bytes32[] memory perm_marks = new bytes32[](n);
         bytes32[] memory temp_marks = new bytes32[](n);
         Spenditure[] memory orderedSuspects = new Spenditure[](n);
-        _visit(epoch, from, index,
-               perm_marks, temp_marks, orderedSuspects,
-               0, 0, n-1);
+        TopoSortInfo memory t_info;
+        t_info.perm_marks = perm_marks;
+        t_info.temp_marks = temp_marks;
+        t_info.orderedSuspects = orderedSuspects;
+        t_info.numFilledPerm = 0;
+        t_info.numFilledTemp = 0;
+        t_info.susPos = n-1;
+        
+        _visit(epoch, from, index, t_info);
 
     }
 
@@ -362,72 +401,69 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 epoch,
         address from,
         uint256 index,
-        bytes32[] memory perm_marks,
-        bytes32[] memory temp_marks,
-        Spenditure[] memory orderedSuspects,
-        uint256 numFilledPerm,
-        uint256 numFilledTemp,
-        uint256 susPos
-    ) internal returns (bytes32[] memory r_perm_marks,
-                        bytes32[] memory r_temp_marks,
-                        Spenditure[] memory r_orderedSuspects,
-                        uint256 r_numFilledPerm,
-                        uint256 r_numFilledTemp,
-                        uint256 r_susPos) {
-        r_perm_marks = perm_marks;
-        r_temp_marks = temp_marks;
-        r_orderedSuspects = orderedSuspects;
-        r_numFilledPerm = numFilledPerm;
-        r_numFilledTemp = numFilledTemp;
-        r_susPos = susPos;
+        TopoSortInfo memory t_info
+    ) internal returns (TopoSortInfo memory r_t_info) {
+        r_t_info.perm_marks = t_info.perm_marks;
+        r_t_info.temp_marks = t_info.temp_marks;
+        r_t_info.orderedSuspects = t_info.orderedSuspects;
+        r_t_info.numFilledPerm = t_info.numFilledPerm;
+        r_t_info.numFilledTemp = t_info.numFilledTemp;
+        r_t_info.susPos = t_info.susPos;
 
-        Spenditure storage s = _spenditures[epoch][from][index];
-        bytes32 claimID = keccak256(abi.encode(s));
-        if (_inArray(claimID, r_perm_marks, r_numFilledPerm)) {
-            return (r_perm_marks, r_temp_marks, r_orderedSuspects,
-                    r_numFilledPerm, r_numFilledTemp, r_susPos);
+        Spenditure memory curr_s = _spenditures[epoch][from][index];
+        bytes32 claimID = keccak256(abi.encode(curr_s));
+        if (_inArray(claimID, r_t_info.perm_marks, r_t_info.numFilledPerm)) {
+            return r_t_info;
         }
         require(
-            !_inArray(claimID, r_temp_marks, r_numFilledTemp),
+            !_inArray(claimID, r_t_info.temp_marks, r_t_info.numFilledTemp),
             "ERC20R: Graph not a DAG, preprocessing not complete/correct."
         );
 
-        r_temp_marks[r_numFilledTemp] = claimID;
-        r_numFilledTemp ++;
+        r_t_info.temp_marks[r_t_info.numFilledTemp] = claimID;
+        r_t_info.numFilledTemp ++;
+        index ++;
         if (
             index !=
             0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
         ) {
             for (index; index < _spenditures[epoch][from].length; index++) {
-                address to = _spenditures[epoch][from][index].to;
-                (
-                    r_perm_marks, r_temp_marks, r_orderedSuspects,
-                    r_numFilledPerm, r_numFilledTemp, r_susPos
-                ) = _visit(epoch, to, index,
-                           r_perm_marks, r_temp_marks, r_orderedSuspects,
-                           r_numFilledPerm, r_numFilledTemp, r_susPos);
+                Spenditure memory s = _spenditures[epoch][from][index];
+                address to = s.to;
+                uint256 childEpoch = s.block_number / DELTA;
+                uint256 childEpochLength = _spenditures[childEpoch][from].length;
+                uint256 childIndex = find_internal(childEpoch,
+                                                   from,
+                                                   0,
+                                                   childEpochLength,
+                                                   s.block_number
+                                                   );
+                r_t_info = _visit(childEpoch, to, childIndex, r_t_info);
             }
         }
         uint256 lastEpoch = block.number / DELTA;
         for (uint256 i = epoch + 1; i < lastEpoch; i++) {
             for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
-                address to = _spenditures[i][from][j].to;
-                (
-                    r_perm_marks, r_temp_marks, r_orderedSuspects,
-                    r_numFilledPerm, r_numFilledTemp, r_susPos
-                ) = _visit(i, to, index,
-                           r_perm_marks, r_temp_marks, r_orderedSuspects,
-                           r_numFilledPerm, r_numFilledTemp, r_susPos);
+                Spenditure memory s = _spenditures[i][from][j];
+                address to = s.to;
+                uint256 childEpoch = s.block_number / DELTA;
+                uint256 childEpochLength = _spenditures[childEpoch][from].length;
+                uint256 childIndex = find_internal(childEpoch,
+                                                   from,
+                                                   0,
+                                                   childEpochLength,
+                                                   s.block_number
+                                                   );
+                r_t_info = _visit(childEpoch, to, childIndex, r_t_info);
             }  
         }
-        r_numFilledTemp -= 1;
-        r_temp_marks[r_numFilledTemp] = 0;
-        r_perm_marks[r_numFilledPerm] = claimID;
-        r_numFilledPerm ++;
-        r_orderedSuspects[r_susPos] = s;
-        r_susPos -= 1;
-        return (r_perm_marks, r_temp_marks, r_orderedSuspects,
-                r_numFilledPerm, r_numFilledTemp, r_susPos);
+        r_t_info.numFilledTemp -= 1;
+        r_t_info.temp_marks[r_t_info.numFilledTemp] = 0;
+        r_t_info.perm_marks[r_t_info.numFilledPerm] = claimID;
+        r_t_info.numFilledPerm ++;
+        r_t_info.orderedSuspects[r_t_info.susPos] = curr_s;
+        r_t_info.susPos -= 1;
+        return r_t_info;
     }
 
     function _inArray(
