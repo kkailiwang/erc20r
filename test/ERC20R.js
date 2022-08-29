@@ -477,8 +477,13 @@ describe("ERC20R", function () {
             await erc20r.connect(addr2).transfer(addr1.address, 50);
 
             const orderedSuspects = await erc20r._getTopologicalOrder(epoch, owner.address, index);
-            // console.log(orderedSuspects);
-
+            expect(orderedSuspects.length).to.equal(3);
+            console.log(addr1.address);
+            expect(orderedSuspects[0]).to.equal(owner.address);
+            expect(orderedSuspects[1]).to.equal(addr2.address);
+            // expect(orderedSuspects[2]).to.equal(addr1.address);
+            // 
+            // 
         });
     });
 

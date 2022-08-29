@@ -67,9 +67,9 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     }
 
     struct TopoSortInfo {
-        bytes32[] perm_marks;
-        bytes32[] temp_marks;
-        Spenditure[] orderedSuspects;
+        address[] perm_marks;
+        address[] temp_marks;
+        address[] orderedSuspects;
         uint256 numFilledPerm;
         uint256 numFilledTemp;
         uint256 susPos;
@@ -296,7 +296,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 begin,
         uint256 end,
         uint256 lowerBound
-    ) internal returns (uint256 ret) {
+    ) internal view returns (uint256 ret) {
         uint256 len = end - begin;
         if (len == 0) {
             return
@@ -327,7 +327,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address from,
         uint256 index,
         uint256 prev_n
-    ) internal returns (uint256){
+    ) internal view returns (uint256){
         uint256 n = prev_n;
         uint256 epochLength = _spenditures[epoch][from].length;
         n++;
@@ -379,12 +379,11 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 epoch,
         address from,
         uint256 index
-    ) public returns (address[] memory orderedSuspects) {
+    ) public view returns (address[] memory) {
         uint256 n = _accumulateLength(epoch, from, index, 0);
-        Spenditure storage s = _spenditures[epoch][from][index];
-        bytes32[] memory perm_marks = new bytes32[](n);
-        bytes32[] memory temp_marks = new bytes32[](n);
-        Spenditure[] memory orderedSuspects = new Spenditure[](n);
+        address[] memory perm_marks = new address[](n);
+        address[] memory temp_marks = new address[](n);
+        address[] memory orderedSuspects = new address[](n);
         TopoSortInfo memory t_info;
         t_info.perm_marks = perm_marks;
         t_info.temp_marks = temp_marks;
@@ -393,8 +392,8 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         t_info.numFilledTemp = 0;
         t_info.susPos = n-1;
         
-        _visit(epoch, from, index, t_info);
-
+        orderedSuspects = _visit(epoch, from, index, t_info).orderedSuspects;
+        return orderedSuspects;
     }
 
     function _visit(
@@ -402,7 +401,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address from,
         uint256 index,
         TopoSortInfo memory t_info
-    ) internal returns (TopoSortInfo memory r_t_info) {
+    ) internal view returns (TopoSortInfo memory r_t_info) {
         r_t_info.perm_marks = t_info.perm_marks;
         r_t_info.temp_marks = t_info.temp_marks;
         r_t_info.orderedSuspects = t_info.orderedSuspects;
@@ -410,17 +409,16 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         r_t_info.numFilledTemp = t_info.numFilledTemp;
         r_t_info.susPos = t_info.susPos;
 
-        Spenditure memory curr_s = _spenditures[epoch][from][index];
-        bytes32 claimID = keccak256(abi.encode(curr_s));
-        if (_inArray(claimID, r_t_info.perm_marks, r_t_info.numFilledPerm)) {
+        if (_addrInArray(from, r_t_info.perm_marks, r_t_info.numFilledPerm)) {
             return r_t_info;
         }
         require(
-            !_inArray(claimID, r_t_info.temp_marks, r_t_info.numFilledTemp),
+            !_addrInArray(from, r_t_info.temp_marks, r_t_info.numFilledTemp),
             "ERC20R: Graph not a DAG, preprocessing not complete/correct."
         );
 
-        r_t_info.temp_marks[r_t_info.numFilledTemp] = claimID;
+        r_t_info.temp_marks[r_t_info.numFilledTemp] = from;
+        
         r_t_info.numFilledTemp ++;
         index ++;
         if (
@@ -430,49 +428,55 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             for (index; index < _spenditures[epoch][from].length; index++) {
                 Spenditure memory s = _spenditures[epoch][from][index];
                 address to = s.to;
-                uint256 childEpoch = s.block_number / DELTA;
-                uint256 childEpochLength = _spenditures[childEpoch][from].length;
-                uint256 childIndex = find_internal(childEpoch,
-                                                   from,
-                                                   0,
-                                                   childEpochLength,
-                                                   s.block_number
-                                                   );
-                r_t_info = _visit(childEpoch, to, childIndex, r_t_info);
+                if (to != address(0)) {
+                    uint256 childEpoch = s.block_number / DELTA;
+                    uint256 childEpochLength = _spenditures[childEpoch][from].length;
+                    uint256 childIndex = find_internal(childEpoch,
+                                                       from,
+                                                       0,
+                                                       childEpochLength,
+                                                       s.block_number
+                                                       );
+                    r_t_info = _visit(childEpoch, to, childIndex, r_t_info);
+                }
             }
         }
+        
         uint256 lastEpoch = block.number / DELTA;
         for (uint256 i = epoch + 1; i < lastEpoch; i++) {
             for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
                 Spenditure memory s = _spenditures[i][from][j];
                 address to = s.to;
-                uint256 childEpoch = s.block_number / DELTA;
-                uint256 childEpochLength = _spenditures[childEpoch][from].length;
-                uint256 childIndex = find_internal(childEpoch,
-                                                   from,
-                                                   0,
-                                                   childEpochLength,
-                                                   s.block_number
-                                                   );
-                r_t_info = _visit(childEpoch, to, childIndex, r_t_info);
+                if (to != address(0)) {
+                    uint256 childEpoch = s.block_number / DELTA;
+                    uint256 childEpochLength = _spenditures[childEpoch][from].length;
+                    uint256 childIndex = find_internal(childEpoch,
+                                                       from,
+                                                       0,
+                                                       childEpochLength,
+                                                       s.block_number
+                                                       );
+                    r_t_info = _visit(childEpoch, to, childIndex, r_t_info);
+                }
             }  
         }
+        
         r_t_info.numFilledTemp -= 1;
-        r_t_info.temp_marks[r_t_info.numFilledTemp] = 0;
-        r_t_info.perm_marks[r_t_info.numFilledPerm] = claimID;
+        r_t_info.temp_marks[r_t_info.numFilledTemp] = address(0);
+        r_t_info.perm_marks[r_t_info.numFilledPerm] = from;
         r_t_info.numFilledPerm ++;
-        r_t_info.orderedSuspects[r_t_info.susPos] = curr_s;
+        r_t_info.orderedSuspects[r_t_info.susPos] = from;
         r_t_info.susPos -= 1;
         return r_t_info;
     }
 
-    function _inArray(
-        bytes32 claimID,
-        bytes32[] memory toSearch,
+    function _addrInArray(
+        address addr,
+        address[] memory toSearch,
         uint256 numFilled
     ) internal pure returns (bool) {
         for (uint i = 0; i < numFilled; i++) {
-            if (toSearch[i] == claimID) {
+            if (toSearch[i] == addr) {
                 return true;
             }
         }
