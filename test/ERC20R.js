@@ -478,12 +478,10 @@ describe("ERC20R", function () {
 
             const orderedSuspects = await erc20r._getTopologicalOrder(epoch, owner.address, index);
             expect(orderedSuspects.length).to.equal(3);
-            console.log(addr1.address);
             expect(orderedSuspects[0]).to.equal(owner.address);
             expect(orderedSuspects[1]).to.equal(addr2.address);
-            // expect(orderedSuspects[2]).to.equal(addr1.address);
-            // 
-            // 
+            expect(orderedSuspects[2]).to.equal(addr1.address);
+            
         });
     });
 

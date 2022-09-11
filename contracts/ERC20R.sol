@@ -409,6 +409,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         r_t_info.numFilledTemp = t_info.numFilledTemp;
         r_t_info.susPos = t_info.susPos;
 
+        // 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
         if (_addrInArray(from, r_t_info.perm_marks, r_t_info.numFilledPerm)) {
             return r_t_info;
         }
@@ -420,7 +421,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         r_t_info.temp_marks[r_t_info.numFilledTemp] = from;
         
         r_t_info.numFilledTemp ++;
-        index ++;
+        
         if (
             index !=
             0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -466,7 +467,9 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         r_t_info.perm_marks[r_t_info.numFilledPerm] = from;
         r_t_info.numFilledPerm ++;
         r_t_info.orderedSuspects[r_t_info.susPos] = from;
-        r_t_info.susPos -= 1;
+        unchecked {
+            r_t_info.susPos -= 1;
+        }
         return r_t_info;
     }
 
