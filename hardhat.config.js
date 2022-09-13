@@ -10,6 +10,7 @@ module.exports = {
   // defaultNetwork: "rinkeby",
   networks: {
     hardhat: {
+      allowUnlimitedContractSize: true,
       mining: {
         mempool: {
           order: "fifo"
@@ -17,6 +18,7 @@ module.exports = {
       }
     },
     rinkeby: {
+      allowUnlimitedContractSize: true,
       url: API_URL,
       accounts: [`0x${PRIVATE_KEY}`]
     }

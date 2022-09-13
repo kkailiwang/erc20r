@@ -67,11 +67,9 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     }
 
     struct TopoSortInfo {
-        address[] perm_marks;
-        address[] temp_marks;
+        AddressHashTable perm_marks;
+        AddressHashTable temp_marks;
         address[] orderedSuspects;
-        uint256 numFilledPerm;
-        uint256 numFilledTemp;
         uint256 susPos;
     }
 
@@ -86,6 +84,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     );
     event ReverseSuccessful(bytes32 claimID);
     event ReverseRejected(bytes32 claimID);
+    event OrderedSuspectsFilled(address[] orderedSuspects);
 
     /**
      * @dev Sets the values for {name} and {symbol}.
@@ -379,20 +378,19 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         uint256 epoch,
         address from,
         uint256 index
-    ) public view returns (address[] memory) {
+    ) public returns (address[] memory) {
         uint256 n = _accumulateLength(epoch, from, index, 0);
-        address[] memory perm_marks = new address[](n);
-        address[] memory temp_marks = new address[](n);
+        AddressHashTable perm_marks = new AddressHashTable(n);
+        AddressHashTable temp_marks = new AddressHashTable(n);
         address[] memory orderedSuspects = new address[](n);
         TopoSortInfo memory t_info;
         t_info.perm_marks = perm_marks;
         t_info.temp_marks = temp_marks;
         t_info.orderedSuspects = orderedSuspects;
-        t_info.numFilledPerm = 0;
-        t_info.numFilledTemp = 0;
         t_info.susPos = n-1;
         
         orderedSuspects = _visit(epoch, from, index, t_info).orderedSuspects;
+        emit OrderedSuspectsFilled(orderedSuspects);
         return orderedSuspects;
     }
 
@@ -401,26 +399,21 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address from,
         uint256 index,
         TopoSortInfo memory t_info
-    ) internal view returns (TopoSortInfo memory r_t_info) {
+    ) internal returns (TopoSortInfo memory r_t_info) {
         r_t_info.perm_marks = t_info.perm_marks;
         r_t_info.temp_marks = t_info.temp_marks;
         r_t_info.orderedSuspects = t_info.orderedSuspects;
-        r_t_info.numFilledPerm = t_info.numFilledPerm;
-        r_t_info.numFilledTemp = t_info.numFilledTemp;
         r_t_info.susPos = t_info.susPos;
 
-        // 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
-        if (_addrInArray(from, r_t_info.perm_marks, r_t_info.numFilledPerm)) {
+        if (r_t_info.perm_marks.addr_in_table(from)) {
             return r_t_info;
         }
         require(
-            !_addrInArray(from, r_t_info.temp_marks, r_t_info.numFilledTemp),
+            !r_t_info.temp_marks.addr_in_table(from),
             "ERC20R: Graph not a DAG, preprocessing not complete/correct."
         );
 
-        r_t_info.temp_marks[r_t_info.numFilledTemp] = from;
-        
-        r_t_info.numFilledTemp ++;
+        r_t_info.temp_marks.insert(from);
         
         if (
             index !=
@@ -462,28 +455,13 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
             }  
         }
         
-        r_t_info.numFilledTemp -= 1;
-        r_t_info.temp_marks[r_t_info.numFilledTemp] = address(0);
-        r_t_info.perm_marks[r_t_info.numFilledPerm] = from;
-        r_t_info.numFilledPerm ++;
+        r_t_info.temp_marks.remove(from);
+        r_t_info.perm_marks.insert(from);
         r_t_info.orderedSuspects[r_t_info.susPos] = from;
         unchecked {
             r_t_info.susPos -= 1;
         }
         return r_t_info;
-    }
-
-    function _addrInArray(
-        address addr,
-        address[] memory toSearch,
-        uint256 numFilled
-    ) internal pure returns (bool) {
-        for (uint i = 0; i < numFilled; i++) {
-            if (toSearch[i] == addr) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /*  Assumes no cycles in spenditures for now
@@ -909,3 +887,63 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         return _spenditures[epoch][from];
     }
 }
+
+
+contract AddressHashTable {
+    uint256 private table_size = 0;
+    address[] private table;
+
+    constructor(uint256 t_size) {
+        table_size = t_size;
+        table = new address[](t_size);
+    }
+
+    function insert(address addr) public {
+        uint256 addr_idx = uint256(uint160(addr)) % table_size;
+        while (table[addr_idx] != address(0)){ // linear probe into the next available index
+            addr_idx = (addr_idx + 1) % table_size;
+        }
+        table[addr_idx] = addr;
+    }
+
+    function remove(address addr) public {
+        uint256 addr_idx = uint256(uint160(addr)) % table_size;
+        uint256 ori_idx = uint256(uint160(addr)) % table_size;
+        if (table[addr_idx] == address(0)){
+            return; // address location is empty in the first place
+        }
+        while (table[addr_idx] != address(0) && table[addr_idx] != addr){
+            addr_idx = (addr_idx + 1) % table_size;
+        }
+        if (table[addr_idx] == address(0)){
+            return; // addr not in table in the first place, silently return
+        }
+        uint256 replace_idx = (addr_idx + 1) % table_size;
+        while (uint256(uint160(table[replace_idx])) % table_size == ori_idx){
+            replace_idx = (replace_idx + 1) % table_size;
+        }
+        replace_idx = (replace_idx - 1) % table_size;
+        if (replace_idx == ori_idx){ // no succeeding items has the same hash value
+            table[ori_idx] = address(0);
+        } else {
+            table[ori_idx] = table[replace_idx];
+            table[replace_idx] = address(0);
+        }
+    }
+
+    function addr_in_table(address addr) public view returns (bool){
+        uint256 addr_idx = uint256(uint160(addr)) % table_size;
+        while (table[addr_idx] != address(0) && table[addr_idx] != addr) {
+            addr_idx = (addr_idx + 1) % table_size;
+        }
+        if (table[addr_idx] == address(0)){
+            return false;
+        }
+        return true;
+    }
+
+    function get_size() public view returns (uint256) {
+        return table_size;
+    }
+}
+
