@@ -27,13 +27,13 @@ function binarySearch(ar, el, compare_fn) {
 }
 
 function compareEras(target, elem) {
-    return target.block_number - elem.block_number;
+    return target.blockNumber - elem.blockNumber;
 }
 
-const findIndex = async (from, to, block_number, amount, ethersContract) => {
-    const target = { from, to, block_number, amount }
+const findIndex = async (from, to, blockNumber, amount, ethersContract) => {
+    const target = { from, to, blockNumber, amount }
     const DELTA = await ethersContract.DELTA();
-    const blockEra = Math.floor(block_number / DELTA);
+    const blockEra = Math.floor(blockNumber / DELTA);
     const spenditures = await ethersContract.getSpenditures(blockEra, from);
     let i = binarySearch(spenditures, target, compareEras);
     if (i < 0) throw Error('No such transaction found as a spenditure in ERC-20R contract.');

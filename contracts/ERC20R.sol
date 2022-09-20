@@ -6,39 +6,24 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
 import "hardhat/console.sol";
 
-/**
- * @dev Implementation of the {IERC20} interface.
- *
- * This implementation is agnostic to the way tokens are created. This means
- * that a supply mechanism has to be added in a derived contract using {_mint}.
- * For a generic mechanism see {ERC20PresetMinterPauser}.
- *
- * TIP: For a detailed writeup see our guide
- * https://forum.zeppelin.solutions/t/how-to-implement-erc20-supply-mechanisms/226[How
- * to implement supply mechanisms].
- *
- * We have followed general OpenZeppelin Contracts guidelines: functions revert
- * instead returning `false` on failure. This behavior is nonetheless
- * conventional and does not conflict with the expectations of ERC20
- * applications.
- *
- * Additionally, an {Approval} event is emitted on calls to {transferFrom}.
- * This allows applications to reconstruct the allowance for all accounts just
- * by listening to said events. Other implementations of the EIP may not emit
- * these events, as it isn't required by the specification.
- *
- * Finally, the non-standard {decreaseAllowance} and {increaseAllowance}
- * functions have been added to mitigate the well-known issues around setting
- * allowances. See {IERC20-approve}.
- */
+uint256 constant NULL = 0;
+
 contract ERC20R is Context, IERC20, IERC20Metadata {
+    using AddressMappingLib for AddressMapping;
+    using Math for uint256;
+    using SafeMath for uint256;
+
     mapping(address => uint256) private _balances;
     mapping(address => uint256) public frozen;
     mapping(uint256 => mapping(address => Spenditure[])) private _spenditures;
-    mapping(bytes32 => Spenditure[]) private _claimToDebts;
+    mapping(bytes32 => Debt[]) private _claimToDebts;
     mapping(uint256 => uint256) private _numAddressesInEpoch;
+    mapping(uint256 => mapping(address => Burn[])) private _burns;
 
     modifier onlyGovernance() {
         require(
@@ -63,14 +48,31 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         address from;
         address to;
         uint256 amount;
-        uint256 block_number;
+        uint256 blockNumber;
+    }
+
+    struct Debt {
+        address from;
+        address to;
+        uint256 amount;
+    }
+
+    struct Burn {
+        uint256 blockNumber;
+        uint256 amount;
     }
 
     struct TopoSortInfo {
-        AddressHashTable perm_marks;
-        AddressHashTable temp_marks;
+        AddressMapping addressMap;
         address[] orderedSuspects;
         uint256 susPos;
+    }
+
+    struct ObligInfo {
+        AddressMapping oblig;
+        address addr;
+        uint256 remaining;
+        AddressMapping addrToSuspectStart;
     }
 
     event ClearedDataInTimeblock(uint256 length, uint256 blockNum);
@@ -84,7 +86,6 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     );
     event ReverseSuccessful(bytes32 claimID);
     event ReverseRejected(bytes32 claimID);
-    event OrderedSuspectsFilled(address[] orderedSuspects);
 
     /**
      * @dev Sets the values for {name} and {symbol}.
@@ -106,6 +107,10 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         NUM_REVERSIBLE_BLOCKS = reversiblePeriod_;
         _governanceContract = governanceContract_;
     }
+
+    /*
+    OTHER REGULAR ERC20 CONTRACT FUNCTIONS (FROM OPENZEPPELIN)
+    */
 
     /**
      * @dev Returns the name of the token.
@@ -178,458 +183,55 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         return true;
     }
 
-    function _getSuspectTxsFromAddress(address from, uint256 startBlock)
-        private
-        returns (Spenditure[] memory suspects,
-                 uint256 sum,
-                 uint256 burned,
-                 uint256 counter)
-    {
-        uint256 startEpoch = startBlock / DELTA;
-        uint256 startEpochLength = _spenditures[startEpoch][from].length;
-        uint256 index = find_internal(
-            startEpoch,
-            from,
-            0,
-            startEpochLength,
-            startBlock
-        );
-        uint256 n = 0;
-        sum = 0;
-
-        uint256 lastEpoch = block.number / DELTA;
-        if (
-            index !=
-            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        ) {
-            n += startEpochLength - index;
-        }
-
-        for (uint256 i = startEpoch + 1; i < lastEpoch; i++) {
-            n += _spenditures[i][from].length;
-        }
-        suspects = new Spenditure[](n);
-
-        if (
-            index !=
-            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        ) {
-            for (index; index < startEpochLength; index++) {
-                Spenditure memory curr = _spenditures[startEpoch][from][index];
-                if (curr.to != address(0)){
-                    suspects[counter] = Spenditure(
-                        curr.from,
-                        curr.to,
-                        curr.amount,
-                        curr.block_number
-                    );
-                    sum += _spenditures[startEpoch][from][index].amount;
-                    counter++;
-                } else { // this is a burn transaction
-                    burned += _spenditures[startEpoch][from][index].amount;
-                }
-            }
-        }
-        for (uint256 i = startEpoch + 1; i < lastEpoch; i++) {
-            for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
-                Spenditure memory curr = _spenditures[i][from][j];
-                if (curr.to != address(0)){
-                    suspects[counter] = curr;
-                    sum += _spenditures[i][from][j].amount;
-                    counter++;
-                } else { // this is a burn transaction
-                    burned += curr.amount;
-                }
-            }  
-        }
+    /**
+     * @dev Destroys `amount` tokens from the caller.
+     *
+     */
+    function burn(uint256 amount) public {
+        _burn(_msgSender(), amount);
     }
 
-    /* Alternative freeze helper that tracks suspect fund down in a DFS manner
-       Used together with freezeAlt
-    */
-    function _freeze_helper_alt(Spenditure memory s, bytes32 claimID) private {
-        uint256 advBalance = _balances[s.to] - frozen[s.to];
-        if (s.amount <= advBalance) {
-            frozen[s.to] += s.amount;
-            _claimToDebts[claimID].push(s);
-        } else {
-            frozen[s.to] += advBalance;
-            _claimToDebts[claimID].push(
-                Spenditure(s.from, s.to, advBalance, s.block_number)
-            );
-            (
-                Spenditure[] memory suspects,
-                uint256 totalAmounts,
-                uint256 totalBurned,
-                uint256 validLength
-            ) = _getSuspectTxsFromAddress(s.to, s.block_number + 1);
-            if (totalAmounts > 0){
-                uint256 leftover = s.amount - advBalance;
-                if (leftover >= totalBurned){
-                    leftover -= totalBurned;
-                } else {
-                    return; // all leftover are burned
-                }
-                if (leftover <= 0){
-                    return;
-                }
-                for (uint256 i = 0; i < validLength; i++) {
-                    //responsible amount is weighted
-                    Spenditure memory s_next = Spenditure(
-                        s.from,
-                        suspects[i].to,
-                        (leftover * suspects[i].amount) / totalAmounts,
-                        suspects[i].block_number
-                    );
-                    _freeze_helper_alt(s_next, claimID);
-                }
-            } // possible that one address burns a lot of tokens that totalAmounts <= 0
-            
-        }
+    function _approve(
+        address owner,
+        address spender,
+        uint256 amount
+    ) internal virtual {
+        require(owner != address(0), "ERC20: approve from the zero address");
+        require(spender != address(0), "ERC20: approve to the zero address");
+
+        _allowances[owner][spender] = amount;
+        emit Approval(owner, spender, amount);
     }
 
-    //binary search
-    function find_internal(
-        uint256 epoch,
-        address from,
-        uint256 begin,
-        uint256 end,
-        uint256 lowerBound
-    ) internal view returns (uint256 ret) {
-        uint256 len = end - begin;
-        if (len == 0) {
-            return
-                _spenditures[epoch][from].length > begin &&
-                    _spenditures[epoch][from][begin].block_number >= lowerBound
-                    ? begin
-                    : 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
-        }
-        uint256 mid = begin + len / 2;
-        uint256 v = _spenditures[epoch][from][mid].block_number;
-        if (lowerBound < v)
-            return find_internal(epoch, from, begin, mid, lowerBound);
-        else if (lowerBound > v)
-            return find_internal(epoch, from, mid + 1, end, lowerBound);
-        else {
-            while (
-                mid > 0 &&
-                _spenditures[epoch][from][mid - 1].block_number == lowerBound
-            ) {
-                mid--;
-            }
-            return mid;
-        }
-    }
-
-    function _accumulateLength(
-        uint256 epoch,
-        address from,
-        uint256 index,
-        uint256 prev_n
-    ) internal view returns (uint256){
-        uint256 n = prev_n;
-        uint256 epochLength = _spenditures[epoch][from].length;
-        n++;
-        if (index >= epochLength){
-            return n;
-        }
-        require(
-            index >= 0,
-            "ERC20R: Invalid index provided."
-        );
-        if (
-            index !=
-            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        ) {
-            for (index+1; index < _spenditures[epoch][from].length; index++) {
-                Spenditure memory s = _spenditures[epoch][from][index];
-                address to = s.to;
-                uint256 childEpoch = s.block_number / DELTA;
-                uint256 childEpochLength = _spenditures[childEpoch][from].length;
-                uint256 childIndex = find_internal(childEpoch,
-                                                   from,
-                                                   0,
-                                                   childEpochLength,
-                                                   s.block_number
-                                                   );
-                n = _accumulateLength(childEpoch, to, childIndex, n);
-            }
-        }
-        uint256 lastEpoch = block.number / DELTA;
-        for (uint256 i = epoch + 1; i < lastEpoch; i++) {
-            for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
-                Spenditure memory s = _spenditures[i][from][j];
-                address to = s.to;
-                uint256 childEpoch = s.block_number / DELTA;
-                uint256 childEpochLength = _spenditures[childEpoch][from].length;
-                uint256 childIndex = find_internal(childEpoch,
-                                                   from,
-                                                   0,
-                                                   childEpochLength,
-                                                   s.block_number
-                                                   );
-                n = _accumulateLength(childEpoch, to, childIndex, n);
-            }  
-        }
-        return n;
-    }
-
-    function _getTopologicalOrder(
-        uint256 epoch,
-        address from,
-        uint256 index
-    ) public returns (address[] memory) {
-        uint256 n = _accumulateLength(epoch, from, index, 0);
-        AddressHashTable perm_marks = new AddressHashTable(n);
-        AddressHashTable temp_marks = new AddressHashTable(n);
-        address[] memory orderedSuspects = new address[](n);
-        TopoSortInfo memory t_info;
-        t_info.perm_marks = perm_marks;
-        t_info.temp_marks = temp_marks;
-        t_info.orderedSuspects = orderedSuspects;
-        t_info.susPos = n-1;
-        
-        orderedSuspects = _visit(epoch, from, index, t_info).orderedSuspects;
-        emit OrderedSuspectsFilled(orderedSuspects);
-        return orderedSuspects;
-    }
-
-    function _visit(
-        uint256 epoch,
-        address from,
-        uint256 index,
-        TopoSortInfo memory t_info
-    ) internal returns (TopoSortInfo memory r_t_info) {
-        r_t_info.perm_marks = t_info.perm_marks;
-        r_t_info.temp_marks = t_info.temp_marks;
-        r_t_info.orderedSuspects = t_info.orderedSuspects;
-        r_t_info.susPos = t_info.susPos;
-
-        if (r_t_info.perm_marks.addr_in_table(from)) {
-            return r_t_info;
-        }
-        require(
-            !r_t_info.temp_marks.addr_in_table(from),
-            "ERC20R: Graph not a DAG, preprocessing not complete/correct."
-        );
-
-        r_t_info.temp_marks.insert(from);
-        
-        if (
-            index !=
-            0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        ) {
-            for (index; index < _spenditures[epoch][from].length; index++) {
-                Spenditure memory s = _spenditures[epoch][from][index];
-                address to = s.to;
-                if (to != address(0)) {
-                    uint256 childEpoch = s.block_number / DELTA;
-                    uint256 childEpochLength = _spenditures[childEpoch][from].length;
-                    uint256 childIndex = find_internal(childEpoch,
-                                                       from,
-                                                       0,
-                                                       childEpochLength,
-                                                       s.block_number
-                                                       );
-                    r_t_info = _visit(childEpoch, to, childIndex, r_t_info);
-                }
-            }
-        }
-        
-        uint256 lastEpoch = block.number / DELTA;
-        for (uint256 i = epoch + 1; i < lastEpoch; i++) {
-            for (uint256 j = 0; j < _spenditures[i][from].length; j++) {
-                Spenditure memory s = _spenditures[i][from][j];
-                address to = s.to;
-                if (to != address(0)) {
-                    uint256 childEpoch = s.block_number / DELTA;
-                    uint256 childEpochLength = _spenditures[childEpoch][from].length;
-                    uint256 childIndex = find_internal(childEpoch,
-                                                       from,
-                                                       0,
-                                                       childEpochLength,
-                                                       s.block_number
-                                                       );
-                    r_t_info = _visit(childEpoch, to, childIndex, r_t_info);
-                }
-            }  
-        }
-        
-        r_t_info.temp_marks.remove(from);
-        r_t_info.perm_marks.insert(from);
-        r_t_info.orderedSuspects[r_t_info.susPos] = from;
-        unchecked {
-            r_t_info.susPos -= 1;
-        }
-        return r_t_info;
-    }
-
-    /*  Assumes no cycles in spenditures for now
-        amount should be in wei
-    */
-    function freeze(
-        uint256 epoch,
-        address from,
-        uint256 index
-    ) public onlyGovernance returns (bytes32 claimID) {
-        // get transaction info
-        uint256 epochLength = _spenditures[epoch][from].length;
-        require(
-            index >= 0 && index < epochLength,
-            "ERC20R: Invalid index provided."
-        );
-        address[] memory orderedSuspects = _getTopologicalOrder(epoch, from, index);
-        
-
-    }
-
-    /*  This is an alternative version of the freeze function.
-        May result in exponential runtime in a trellis graph
-    */
-    function freezeAlt(
-        uint256 epoch,
-        address from,
-        uint256 index
-    ) public onlyGovernance returns (bytes32 claimID) {
-        // get transaction info
-        uint256 epochLength = _spenditures[epoch][from].length;
-        require(
-            index >= 0 && index < epochLength,
-            "ERC20R: Invalid index provided."
-        );
-        Spenditure storage s = _spenditures[epoch][from][index];
-        uint256 blockNumber = s.block_number;
-        address to = s.to;
-        uint256 amount = s.amount;
-        if (block.number > NUM_REVERSIBLE_BLOCKS) {
+    function _spendAllowance(
+        address owner,
+        address spender,
+        uint256 amount
+    ) internal virtual {
+        uint256 currentAllowance = allowance(owner, spender);
+        if (currentAllowance != type(uint256).max) {
             require(
-                blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
-                "ERC20R: specified transaction is no longer reversible."
+                currentAllowance >= amount,
+                "ERC20: insufficient allowance"
             );
+            unchecked {
+                _approve(owner, spender, currentAllowance - amount);
+            }
         }
-        
-        //hash the spenditure; this is the claim hash now. what about two identical
-        claimID = keccak256(abi.encode(s));
-        _freeze_helper_alt(s, claimID);
-        emit FreezeSuccessful(from, to, amount, blockNumber, index, claimID);
     }
 
-    function reverse(bytes32 claimID) external onlyGovernance {
-        //go through all of _claimToDebts[tx_va0] and transfer
-        for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
-            Spenditure storage s = _claimToDebts[claimID][i];
-            frozen[s.to] -= s.amount;
-            _transfer(s.to, s.from, s.amount);
-        }
-        delete _claimToDebts[claimID];
-        emit ReverseSuccessful(claimID);
-    }
-
-    function rejectReverse(bytes32 claimID) external onlyGovernance {
-        for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
-            Spenditure storage s = _claimToDebts[claimID][i];
-            frozen[s.to] -= s.amount;
-            delete _claimToDebts[claimID];
-        }
-        emit ReverseRejected(claimID);
-    }
-
-    function clean(address[] calldata addresses, uint256 epoch) external {
-        //requires you to clear all of it.
-        require(
-            block.number > NUM_REVERSIBLE_BLOCKS &&
-                (epoch + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
-            "ERC20-R: Block Epoch is not allowed to be cleared yet."
-        );
-        require(
-            _numAddressesInEpoch[epoch] == addresses.length,
-            "ERC20R: Must clear the entire block Epoch's data at once."
-        );
-        for (uint256 i = 0; i < addresses.length; i++) {
-            //require it to have data, not empty arrary
-            require(
-                _spenditures[epoch][addresses[i]].length > 0,
-                "ERC20R: addresses to clean for block Epoch does not match the actual data storage."
-            );
-            delete _spenditures[epoch][addresses[i]];
-        }
-        _numAddressesInEpoch[epoch] = 0;
-        emit ClearedDataInTimeblock(addresses.length, epoch);
-    }
-
-    /**
-     * @dev See {IERC20-allowance}.
-     */
-    function allowance(address owner, address spender)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
-        return _allowances[owner][spender];
-    }
-
-    /**
-     * @dev See {IERC20-approve}.
-     *
-     * NOTE: If `amount` is the maximum `uint256`, the allowance is not updated on
-     * `transferFrom`. This is semantically equivalent to an infinite approval.
-     *
-     * Requirements:
-     *
-     * - `spender` cannot be the zero address.
-     */
-    function approve(address spender, uint256 amount)
-        public
-        virtual
-        override
-        returns (bool)
-    {
-        address owner = _msgSender();
-        _approve(owner, spender, amount);
-        return true;
-    }
-
-    /**
-     * @dev See {IERC20-transferFrom}.
-     *
-     * Emits an {Approval} event indicating the updated allowance. This is not
-     * required by the EIP. See the note at the beginning of {ERC20}.
-     *
-     * NOTE: Does not update the allowance if the current allowance
-     * is the maximum `uint256`.
-     *
-     * Requirements:
-     *
-     * - `from` and `to` cannot be the zero address.
-     * - `from` must have a balance of at least `amount`.
-     * - the caller must have allowance for ``from``'s tokens of at least
-     * `amount`.
-     */
-    function transferFrom(
+    function _beforeTokenTransfer(
         address from,
         address to,
         uint256 amount
-    ) public virtual override returns (bool) {
-        address spender = _msgSender();
-        _spendAllowance(from, spender, amount);
-        _transfer(from, to, amount);
-        return true;
-    }
+    ) internal virtual {}
 
-    /**
-     * @dev Atomically increases the allowance granted to `spender` by the caller.
-     *
-     * This is an alternative to {approve} that can be used as a mitigation for
-     * problems described in {IERC20-approve}.
-     *
-     * Emits an {Approval} event indicating the updated allowance.
-     *
-     * Requirements:
-     *
-     * - `spender` cannot be the zero address.
-     */
+    function _afterTokenTransfer(
+        address from,
+        address to,
+        uint256 amount
+    ) internal virtual {}
+
     function increaseAllowance(address spender, uint256 addedValue)
         public
         virtual
@@ -640,20 +242,6 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         return true;
     }
 
-    /**
-     * @dev Atomically decreases the allowance granted to `spender` by the caller.
-     *
-     * This is an alternative to {approve} that can be used as a mitigation for
-     * problems described in {IERC20-approve}.
-     *
-     * Emits an {Approval} event indicating the updated allowance.
-     *
-     * Requirements:
-     *
-     * - `spender` cannot be the zero address.
-     * - `spender` must have allowance for the caller of at least
-     * `subtractedValue`.
-     */
     function decreaseAllowance(address spender, uint256 subtractedValue)
         public
         virtual
@@ -672,6 +260,450 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         return true;
     }
 
+    function allowance(address owner, address spender)
+        public
+        view
+        virtual
+        override
+        returns (uint256)
+    {
+        return _allowances[owner][spender];
+    }
+
+    function approve(address spender, uint256 amount)
+        public
+        virtual
+        override
+        returns (bool)
+    {
+        address owner = _msgSender();
+        _approve(owner, spender, amount);
+        return true;
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) public virtual override returns (bool) {
+        address spender = _msgSender();
+        _spendAllowance(from, spender, amount);
+        _transfer(from, to, amount);
+        return true;
+    }
+
+    /** @dev Creates `amount` tokens and assigns them to `account`, increasing
+     * the total supply.
+     *
+     * Emits a {Transfer} event with `from` set to the zero address.
+     *
+     * Requirements:
+     *
+     * - `account` cannot be the zero address.
+     */
+    function _mint(address account, uint256 amount) internal virtual {
+        require(account != address(0), "ERC20: mint to the zero address");
+
+        _beforeTokenTransfer(address(0), account, amount);
+
+        _totalSupply += amount;
+        _balances[account] += amount;
+        emit Transfer(address(0), account, amount);
+
+        _afterTokenTransfer(address(0), account, amount);
+    }
+
+    /*
+     * FREEZE AND REVERSE RELATED FUNCTIONS
+     */
+
+    /**
+    Helper method for binary search for a given block number within one of the nested mappings 
+    (_spenditures or _burns). Returns the index of the spenditure with the smallest block number
+    that's still greater than or equal to the lowerBound argument 
+     */
+    function _findInternal(
+        bool forSpenditures, //false if for _burns
+        uint256 epoch,
+        address from,
+        uint256 begin,
+        uint256 end,
+        uint256 lowerBound
+    ) private view returns (uint256 ret) {
+        uint256 len = end - begin;
+        if (len == 0) {
+            if (
+                (forSpenditures &&
+                    _spenditures[epoch][from].length > begin &&
+                    _spenditures[epoch][from][begin].blockNumber >=
+                    lowerBound) ||
+                (!forSpenditures &&
+                    _burns[epoch][from].length > begin &&
+                    _burns[epoch][from][begin].blockNumber >= lowerBound)
+            ) {
+                return begin;
+            }
+            return
+                0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+        }
+        uint256 mid = begin + len / 2;
+        uint256 v = forSpenditures
+            ? _spenditures[epoch][from][mid].blockNumber
+            : _burns[epoch][from][mid].blockNumber;
+        if (lowerBound < v)
+            return
+                _findInternal(
+                    forSpenditures,
+                    epoch,
+                    from,
+                    begin,
+                    mid,
+                    lowerBound
+                );
+        else if (lowerBound > v)
+            return
+                _findInternal(
+                    forSpenditures,
+                    epoch,
+                    from,
+                    mid + 1,
+                    end,
+                    lowerBound
+                );
+        else {
+            while (
+                mid > 0 &&
+                ((forSpenditures &&
+                    _spenditures[epoch][from][mid - 1].blockNumber ==
+                    lowerBound) ||
+                    (!forSpenditures &&
+                        _burns[epoch][from][mid - 1].blockNumber == lowerBound))
+            ) {
+                mid--;
+            }
+            return mid;
+        }
+    }
+
+    /**
+    Helper method for freeze. In order to create arrays and maps for the suspect addresses
+    in memory, we must know an approximate upper bound on the number of addresses. 
+    This returns the number of suspect transactions (which is >= # suspect addresses). 
+    Starting at a given spenditure s, does a DFS starting at s 
+     */
+    function _getMaxNumSuspects(Spenditure storage curr)
+        private
+        view
+        returns (uint256)
+    {
+        uint256 n = 0;
+        (uint256 currEpoch, uint256 startIndex) = _getEpochAndIndex(curr, true);
+        //go through all descendant txs from curr.to recursively (after curr.block_number)
+        for (
+            ;
+            startIndex < _spenditures[currEpoch][curr.to].length;
+            startIndex++
+        ) {
+            Spenditure storage s = _spenditures[currEpoch][curr.to][startIndex];
+            n += _getMaxNumSuspects(s);
+        }
+        uint256 lastEpoch = _getEpoch(block.number);
+        for (uint256 i = currEpoch + 1; i <= lastEpoch; i++) {
+            for (uint256 j = 0; j < _spenditures[i][curr.to].length; j++) {
+                Spenditure storage s = _spenditures[i][curr.to][j];
+                n += _getMaxNumSuspects(s);
+            }
+        }
+        return n + 1;
+    }
+
+    /**
+    Helper method - 
+    Given a spenditure s, return the epoch and starting index to begin iteration on descendants of s.to
+     */
+    function _getEpochAndIndex(Spenditure storage curr, bool forSpenditures)
+        private
+        view
+        returns (uint256 currEpoch, uint256 startIndex)
+    {
+        currEpoch = _getEpoch(curr.blockNumber + 1);
+        startIndex = _findInternal(
+            forSpenditures,
+            currEpoch,
+            curr.to,
+            0,
+            forSpenditures
+                ? _spenditures[currEpoch][curr.to].length
+                : _burns[currEpoch][curr.to].length,
+            curr.blockNumber + 1
+        );
+    }
+
+    /**
+    Helper for freeze. Freeze algorithm goes through suspect addresses 
+    in topological order. 
+    */
+    function _getTopologicalOrder(Spenditure storage s)
+        private
+        view
+        returns (TopoSortInfo memory)
+    {
+        uint256 n = _getMaxNumSuspects(s);
+        //mapping from address to the block number of the first suspicious transaction
+        AddressMapping memory addrToSuspectStart = AddressMapping(
+            new NodeStatus[](n),
+            n
+        );
+        //may be larger than needed
+        address[] memory orderedSuspects = new address[](n);
+        TopoSortInfo memory t = TopoSortInfo(
+            addrToSuspectStart,
+            orderedSuspects,
+            0
+        );
+        _visit(s, t);
+        return t;
+    }
+
+    /**
+    Recursive helper method for _getTopologicalOrder
+    DFS approach for topological sort
+    modifies parameter TopoSortInfo t in-place
+     */
+    function _visit(Spenditure storage curr, TopoSortInfo memory t)
+        private
+        view
+    {
+        uint256 earliestBlock = t.addressMap.get(curr.to);
+        if (earliestBlock == NULL || curr.blockNumber < earliestBlock) {
+            t.addressMap.put(curr.to, curr.blockNumber);
+        }
+        (uint256 currEpoch, uint256 startIndex) = _getEpochAndIndex(curr, true);
+        //go through all descendant txs from curr.to recursively (after curr.block_number)
+        for (
+            ;
+            startIndex < _spenditures[currEpoch][curr.to].length;
+            startIndex++
+        ) {
+            Spenditure storage s = _spenditures[currEpoch][curr.to][startIndex];
+            if (t.addressMap.get(s.to) == NULL) {
+                _visit(s, t);
+            }
+        }
+        uint256 lastEpoch = _getEpoch(block.number);
+        for (uint256 i = currEpoch + 1; i <= lastEpoch; i++) {
+            for (uint256 j = 0; j < _spenditures[i][curr.to].length; j++) {
+                Spenditure storage s = _spenditures[i][curr.to][j];
+                if (t.addressMap.get(s.to) == NULL) {
+                    _visit(s, t);
+                }
+            }
+        }
+        t.orderedSuspects[t.susPos] = curr.to;
+        t.susPos++;
+    }
+
+    //returns the amount burned at s.to between s.blockNumber and now.
+    function _burnedSince(Spenditure storage s)
+        private
+        view
+        returns (uint256 burned)
+    {
+        burned = 0;
+        (uint256 currEpoch, uint256 startIndex) = _getEpochAndIndex(s, false);
+        for (; startIndex < _burns[currEpoch][s.to].length; startIndex++) {
+            Burn storage b = _burns[currEpoch][s.to][startIndex];
+            burned += b.amount;
+        }
+        uint256 lastEpoch = _getEpoch(block.number);
+        for (uint256 i = currEpoch + 1; i <= lastEpoch; i++) {
+            for (uint256 j = 0; j < _burns[i][s.to].length; j++) {
+                Burn storage b = _burns[currEpoch][s.to][startIndex];
+                burned += b.amount;
+            }
+        }
+    }
+
+    /**
+    Helper method for freeze, accounts for inner for loop of the freeze algorithm. 
+    Since burns are accounted for before this function is called, we can assume conservation 
+    of funds in the ecosystem and that all obligation is passed to the children. 
+     */
+    function _calculateChildOblig(ObligInfo memory info) private view {
+        uint256 startBlock = info.addrToSuspectStart.get(info.addr);
+        uint256 firstEpoch = _getEpoch(startBlock + 1);
+        uint256 startIndex = _findInternal(
+            true,
+            firstEpoch,
+            info.addr,
+            0,
+            _spenditures[firstEpoch][info.addr].length,
+            startBlock + 1
+        );
+        uint256 lastEpoch = _getEpoch(block.number);
+        //Iterates through transactions in reverse chronological order
+        for (
+            uint256 currEpoch = lastEpoch;
+            currEpoch > firstEpoch;
+            currEpoch--
+        ) {
+            for (
+                uint256 j = _spenditures[currEpoch][info.addr].length;
+                j > 0;
+                j--
+            ) {
+                Spenditure storage curr = _spenditures[currEpoch][info.addr][
+                    j - 1
+                ];
+                uint256 ob = info.remaining.min(curr.amount);
+                info.oblig.put(curr.to, info.oblig.get(curr.to) + ob);
+                info.remaining -= ob;
+                if (info.remaining == 0) return;
+            }
+        }
+        for (
+            uint256 j = _spenditures[firstEpoch][info.addr].length;
+            j > startIndex;
+            j--
+        ) {
+            Spenditure storage curr = _spenditures[firstEpoch][info.addr][
+                j - 1
+            ];
+            uint256 ob = info.remaining.min(curr.amount);
+            info.oblig.put(curr.to, info.oblig.get(curr.to) + ob);
+            info.remaining -= ob;
+            if (info.remaining == 0) return;
+        }
+    }
+
+    /* Assumes no cycles in spenditures for now
+     * Can only be called by governance contract.
+     * Called if judges approve the freeze request.
+     */
+    function freeze(
+        uint256 epoch,
+        address from,
+        uint256 index
+    ) public onlyGovernance returns (bytes32 claimID) {
+        // get transaction info
+        uint256 epochLength = _spenditures[epoch][from].length;
+        require(
+            index >= 0 && index < epochLength,
+            "ERC20R: Invalid index provided."
+        );
+        Spenditure storage s = _spenditures[epoch][from][index];
+        claimID = keccak256(abi.encode(s));
+
+        //check if it's still reversible
+        if (block.number > NUM_REVERSIBLE_BLOCKS) {
+            require(
+                s.blockNumber >= block.number - NUM_REVERSIBLE_BLOCKS,
+                "ERC20R: specified transaction is no longer reversible."
+            );
+        }
+
+        //in the future, we'd need an extra preprocessing step here for removing loops.
+
+        TopoSortInfo memory t = _getTopologicalOrder(s);
+
+        AddressMapping memory oblig = AddressMapping(
+            new NodeStatus[](t.orderedSuspects.length),
+            t.orderedSuspects.length
+        );
+        oblig.put(s.to, s.amount);
+        //orderedSuspects is in reverse topological order, so loop backwards.
+        for (uint256 addrIndex = t.susPos; addrIndex > 0; --addrIndex) {
+            address addr = t.orderedSuspects[addrIndex - 1];
+
+            uint256 toFreeze = oblig.get(addr).min(_balances[addr]);
+
+            frozen[addr] += toFreeze;
+            if (toFreeze > 0)
+                _claimToDebts[claimID].push(Debt(addr, s.from, toFreeze));
+            (bool zeroOrPositive, uint256 remaining) = oblig.get(addr).trySub(
+                toFreeze + _burnedSince(s)
+            );
+            if (!zeroOrPositive || remaining == 0) {
+                continue;
+            }
+            _calculateChildOblig(
+                ObligInfo(oblig, addr, remaining, t.addressMap)
+            );
+        }
+        //hash the spenditure; this is the claim hash now.
+        emit FreezeSuccessful(
+            from,
+            s.to,
+            s.amount,
+            s.blockNumber,
+            index,
+            claimID
+        );
+    }
+
+    /**
+    Called if the judges vote to reverse the transaction. Can only be called by governance contract
+    */
+    function reverse(bytes32 claimID) external onlyGovernance {
+        require(_claimToDebts[claimID].length > 0, "Invalid claimID.");
+        //go through all of _claimToDebts[tx_va0] and transfer
+        for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
+            Debt storage s = _claimToDebts[claimID][i];
+            frozen[s.from] -= s.amount;
+            _transfer(s.from, s.to, s.amount);
+        }
+        delete _claimToDebts[claimID];
+        emit ReverseSuccessful(claimID);
+    }
+
+    /**
+    Called if the judges disapprove the reversal. Can only be called by governance contract
+    */
+    function rejectReverse(bytes32 claimID) external onlyGovernance {
+        require(_claimToDebts[claimID].length > 0, "Invalid claimID.");
+        for (uint256 i = 0; i < _claimToDebts[claimID].length; i++) {
+            Debt storage s = _claimToDebts[claimID][i];
+            frozen[s.from] -= s.amount;
+        }
+        delete _claimToDebts[claimID];
+        emit ReverseRejected(claimID);
+    }
+
+    /**
+    addresses argument is calculated by reading the _spenditures and _burns structures
+    from the chain. 
+    It is expected that this function is called regularly to clear the contract of 
+    any outdated unused storage data. 
+    */
+    function clean(address[] calldata addresses, uint256 epoch) external {
+        require(
+            block.number > NUM_REVERSIBLE_BLOCKS &&
+                (epoch + 1) * DELTA - 1 < block.number - NUM_REVERSIBLE_BLOCKS,
+            "ERC20-R: Block Epoch is not allowed to be cleared yet."
+        );
+        //requires you to clear all of it.
+        require(
+            _numAddressesInEpoch[epoch] == addresses.length,
+            "ERC20R: Must clear the entire block Epoch's data at once."
+        );
+        for (uint256 i = 0; i < addresses.length; i++) {
+            //require it to have data, not empty arrary
+            require(
+                _spenditures[epoch][addresses[i]].length > 0 ||
+                    _burns[epoch][addresses[i]].length > 0,
+                "ERC20R: addresses to clean for block Epoch does not match the actual data storage."
+            );
+            delete _spenditures[epoch][addresses[i]];
+            delete _burns[epoch][addresses[i]];
+        }
+        _numAddressesInEpoch[epoch] = 0;
+        emit ClearedDataInTimeblock(addresses.length, epoch);
+    }
+
+    /*
+     * MODIFIED ERC20 METHODS
+     */
+
     /**
      * @dev Moves `amount` of tokens from `from` to `to`.
      *
@@ -679,12 +711,6 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
      * e.g. implement automatic token fees, slashing mechanisms, etc.
      *
      * Emits a {Transfer} event.
-     *
-     * Requirements:
-     *
-     * - `from` cannot be the zero address.
-     * - `to` cannot be the zero address.
-     * - `from` must have a balance of at least `amount`.
      */
     function _transfer(
         address from,
@@ -713,11 +739,14 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _balances[to] += amount;
 
         uint256 epoch = block.number / DELTA;
-        if (_spenditures[epoch][from].length == 0) {
+        if (
+            _spenditures[epoch][from].length == 0 &&
+            _burns[epoch][from].length == 0
+        ) {
             //new value stored for mapping
             _numAddressesInEpoch[epoch] += 1;
         }
-
+        //record transaction in case of future freeze
         _spenditures[epoch][from].push(
             Spenditure(from, to, amount, block.number)
         );
@@ -727,45 +756,11 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _afterTokenTransfer(from, to, amount);
     }
 
-    /** @dev Creates `amount` tokens and assigns them to `account`, increasing
-     * the total supply.
-     *
-     * Emits a {Transfer} event with `from` set to the zero address.
-     *
-     * Requirements:
-     *
-     * - `account` cannot be the zero address.
-     */
-    function _mint(address account, uint256 amount) internal virtual {
-        require(account != address(0), "ERC20: mint to the zero address");
-
-        _beforeTokenTransfer(address(0), account, amount);
-
-        _totalSupply += amount;
-        _balances[account] += amount;
-        emit Transfer(address(0), account, amount);
-
-        _afterTokenTransfer(address(0), account, amount);
-    }
-
-    /**
-    * @dev Destroys `amount` tokens from the caller.
-    *
-    */
-    function burn(uint256 amount) public {
-        _burn(_msgSender(), amount);
-    }
-
     /**
      * @dev Destroys `amount` tokens from `account`, reducing the
      * total supply.
      *
      * Emits a {Transfer} event with `to` set to the zero address.
-     *
-     * Requirements:
-     *
-     * - `account` cannot be the zero address.
-     * - `account` must have at least `amount` unfrozen tokens.
      */
     function _burn(address account, uint256 amount) internal virtual {
         require(account != address(0), "ERC20R: burn from the zero address");
@@ -773,111 +768,33 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         _beforeTokenTransfer(account, address(0), amount);
 
         uint256 accountBalance = _balances[account] - frozen[account];
-        require(accountBalance >= amount, "ERC20R: burn amount exceeds unfrozen balance");
+        require(
+            accountBalance >= amount,
+            "ERC20R: burn amount exceeds unfrozen balance"
+        );
         unchecked {
             _balances[account] = _balances[account] - amount;
         }
         _totalSupply -= amount;
-
-        uint256 epoch = block.number / DELTA;
-        _spenditures[epoch][account].push(
-            Spenditure(account, address(0), amount, block.number)
-        );
+        uint256 epoch = _getEpoch(block.number);
+        //update burn log
+        _burns[epoch][account].push(Burn(block.number, amount));
+        if (
+            _spenditures[epoch][account].length == 0 &&
+            _burns[epoch][account].length == 0
+        ) {
+            //new value stored for mapping
+            _numAddressesInEpoch[epoch] += 1;
+        }
 
         emit Transfer(account, address(0), amount);
 
         _afterTokenTransfer(account, address(0), amount);
     }
 
-    /**
-     * @dev Sets `amount` as the allowance of `spender` over the `owner` s tokens.
-     *
-     * This internal function is equivalent to `approve`, and can be used to
-     * e.g. set automatic allowances for certain subsystems, etc.
-     *
-     * Emits an {Approval} event.
-     *
-     * Requirements:
-     *
-     * - `owner` cannot be the zero address.
-     * - `spender` cannot be the zero address.
-     */
-    function _approve(
-        address owner,
-        address spender,
-        uint256 amount
-    ) internal virtual {
-        require(owner != address(0), "ERC20: approve from the zero address");
-        require(spender != address(0), "ERC20: approve to the zero address");
-
-        _allowances[owner][spender] = amount;
-        emit Approval(owner, spender, amount);
+    function _getEpoch(uint256 blockNumber) private view returns (uint256) {
+        return blockNumber / DELTA;
     }
-
-    /**
-     * @dev Updates `owner` s allowance for `spender` based on spent `amount`.
-     *
-     * Does not update the allowance amount in case of infinite allowance.
-     * Revert if not enough allowance is available.
-     *
-     * Might emit an {Approval} event.
-     */
-    function _spendAllowance(
-        address owner,
-        address spender,
-        uint256 amount
-    ) internal virtual {
-        uint256 currentAllowance = allowance(owner, spender);
-        if (currentAllowance != type(uint256).max) {
-            require(
-                currentAllowance >= amount,
-                "ERC20: insufficient allowance"
-            );
-            unchecked {
-                _approve(owner, spender, currentAllowance - amount);
-            }
-        }
-    }
-
-    /**
-     * @dev Hook that is called before any transfer of tokens. This includes
-     * minting and burning.
-     *
-     * Calling conditions:
-     *
-     * - when `from` and `to` are both non-zero, `amount` of ``from``'s tokens
-     * will be transferred to `to`.
-     * - when `from` is zero, `amount` tokens will be minted for `to`.
-     * - when `to` is zero, `amount` of ``from``'s tokens will be burned.
-     * - `from` and `to` are never both zero.
-     *
-     * To learn more about hooks, head to xref:ROOT:extending-contracts.adoc#using-hooks[Using Hooks].
-     */
-    function _beforeTokenTransfer(
-        address from,
-        address to,
-        uint256 amount
-    ) internal virtual {}
-
-    /**
-     * @dev Hook that is called after any transfer of tokens. This includes
-     * minting and burning.
-     *
-     * Calling conditions:
-     *
-     * - when `from` and `to` are both non-zero, `amount` of ``from``'s tokens
-     * has been transferred to `to`.
-     * - when `from` is zero, `amount` tokens have been minted for `to`.
-     * - when `to` is zero, `amount` of ``from``'s tokens have been burned.
-     * - `from` and `to` are never both zero.
-     *
-     * To learn more about hooks, head to xref:ROOT:extending-contracts.adoc#using-hooks[Using Hooks].
-     */
-    function _afterTokenTransfer(
-        address from,
-        address to,
-        uint256 amount
-    ) internal virtual {}
 
     function getSpenditures(uint256 epoch, address from)
         external
@@ -888,62 +805,65 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
     }
 }
 
-
-contract AddressHashTable {
-    uint256 private table_size = 0;
-    address[] private table;
-
-    constructor(uint256 t_size) {
-        table_size = t_size;
-        table = new address[](t_size);
-    }
-
-    function insert(address addr) public {
-        uint256 addr_idx = uint256(uint160(addr)) % table_size;
-        while (table[addr_idx] != address(0)){ // linear probe into the next available index
-            addr_idx = (addr_idx + 1) % table_size;
-        }
-        table[addr_idx] = addr;
-    }
-
-    function remove(address addr) public {
-        uint256 addr_idx = uint256(uint160(addr)) % table_size;
-        uint256 ori_idx = uint256(uint160(addr)) % table_size;
-        if (table[addr_idx] == address(0)){
-            return; // address location is empty in the first place
-        }
-        while (table[addr_idx] != address(0) && table[addr_idx] != addr){
-            addr_idx = (addr_idx + 1) % table_size;
-        }
-        if (table[addr_idx] == address(0)){
-            return; // addr not in table in the first place, silently return
-        }
-        uint256 replace_idx = (addr_idx + 1) % table_size;
-        while (uint256(uint160(table[replace_idx])) % table_size == ori_idx){
-            replace_idx = (replace_idx + 1) % table_size;
-        }
-        replace_idx = (replace_idx - 1) % table_size;
-        if (replace_idx == ori_idx){ // no succeeding items has the same hash value
-            table[ori_idx] = address(0);
-        } else {
-            table[ori_idx] = table[replace_idx];
-            table[replace_idx] = address(0);
-        }
-    }
-
-    function addr_in_table(address addr) public view returns (bool){
-        uint256 addr_idx = uint256(uint160(addr)) % table_size;
-        while (table[addr_idx] != address(0) && table[addr_idx] != addr) {
-            addr_idx = (addr_idx + 1) % table_size;
-        }
-        if (table[addr_idx] == address(0)){
-            return false;
-        }
-        return true;
-    }
-
-    function get_size() public view returns (uint256) {
-        return table_size;
-    }
+//used for address mapping for topological sort, and oblig mapping
+struct NodeStatus {
+    address addr;
+    uint256 val;
 }
 
+//exists because vanilla mappings can only exist in storage, but that
+//is too expensive.
+struct AddressMapping {
+    NodeStatus[] slots;
+    uint256 num_slots;
+}
+
+//library for addressmapping, for modularity
+library AddressMappingLib {
+    //assumes there's enough slots
+    function put(
+        AddressMapping memory table,
+        address addr,
+        uint256 val
+    ) internal pure returns (AddressMapping memory) {
+        uint256 i = getDefaultIndex(addr) % table.num_slots;
+        while (table.slots[i].addr != address(0)) {
+            if (table.slots[i].addr == addr) {
+                //updating existing record
+                break;
+            }
+            // linear probe into the next available index
+            i = (i + 1) % table.num_slots;
+        }
+        table.slots[i].addr = addr;
+        table.slots[i].val = val;
+        return table;
+    }
+
+    function get(AddressMapping memory table, address addr)
+        internal
+        pure
+        returns (uint256)
+    {
+        uint256 def = getDefaultIndex(addr) % table.num_slots;
+        uint256 i;
+        bool hasIncremented = false;
+        for (
+            i = def;
+            table.slots[i % table.num_slots].addr != address(0) && //slot isn't empty
+                table.slots[i % table.num_slots].addr != addr; //haven't found a match yet
+            i++
+        ) {
+            if (hasIncremented && i == def) return NULL; // has gone through all slots
+            hasIncremented = true;
+        }
+        return
+            table.slots[i % table.num_slots].addr == addr
+                ? table.slots[i % table.num_slots].val
+                : NULL;
+    }
+
+    function getDefaultIndex(address addr) private pure returns (uint256) {
+        return uint256(uint160(addr));
+    }
+}

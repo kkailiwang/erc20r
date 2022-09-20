@@ -94,7 +94,7 @@ describe("ERC721R", function () {
                     await ensureMine(manualMine);
                     const newTransfers = await erc721r.queryFilter('Transfer');
                     expect(newTransfers.length - oldTransfers.length).to.equal(0);
-                }else{
+                } else {
                     await expect(
                         erc721r.connect(addr3).transferFrom(addr3.address, addr2.address, tokenId)
                     ).to.be.revertedWith("ERC721R: transfer frozen token");
@@ -111,13 +111,13 @@ describe("ERC721R", function () {
                 expect(await erc721r.ownerOf(otherToken)).to.equal(addr2.address);
 
                 //cannot spend a token you do not own
-                if (manualMine){
+                if (manualMine) {
                     const oldTransfers = await erc721r.queryFilter('Transfer');
                     await erc721r.connect(addr3).transferFrom(addr3.address, addr2.address, tokenId);
                     await ensureMine(manualMine);
                     const newTransfers = await erc721r.queryFilter('Transfer');
                     expect(newTransfers.length - oldTransfers.length).to.equal(0);
-                }else{
+                } else {
                     await expect(
                         erc721r.connect(addr1).transferFrom(addr1.address, addr2.address, otherToken)
                     ).to.be.revertedWith("ERC721R: transfer caller is not owner nor approved");
@@ -147,7 +147,7 @@ describe("ERC721R", function () {
                 await ensureMine(manualMine);
                 const freezes = await erc721r.queryFilter('FreezeSuccessful');
                 expect(freezes.length).to.equal(1);
-                
+
                 const reverse = erc721r.rejectReverse(tokenId);
                 expect(reverse).to.emit(erc721r, 'ReverseRejected');
                 await reverse;

@@ -13,8 +13,6 @@ describe("ERC20R", function () {
     let addr3;
     let DELTA;
 
-
-
     //manualMine is bool - true if auto-mining is turned off
     const functionalTests = (manualMine) => {
 
@@ -137,7 +135,7 @@ describe("ERC20R", function () {
                 }
             });
 
-            it("Account can burn unfrozen money but cannot burn frozen money.", async function (){
+            it("Account can burn unfrozen money but cannot burn frozen money.", async function () {
                 const claimID = await erc20r.freeze(epoch, owner.address, index);
                 await ensureMine(manualMine);
 
@@ -178,7 +176,7 @@ describe("ERC20R", function () {
                 }
             });
 
-            it("Burning reduces the amount accountable.", async function (){
+            it("Burning reduces the amount accountable.", async function () {
                 // make a couple of more transactions from address 3 to 2
                 await erc20r.transfer(addr3.address, 100);
                 await erc20r.connect(addr3).transfer(addr2.address, 50);
@@ -186,7 +184,7 @@ describe("ERC20R", function () {
                 await erc20r.connect(addr3).burn(amountToAddr3);
                 await ensureMine(manualMine);
                 const claimID = await erc20r.freeze(epoch, owner.address, indexToAddr3);
-                
+
                 // since address 3 has burned, address 2 should not be frozen
                 const frozenAddr2 = await erc20r.frozen(addr2.address);
                 expect(frozenAddr2).to.equal(0);
@@ -304,9 +302,9 @@ describe("ERC20R", function () {
                 expect(await erc20r.balanceOf(addr2.address)).to.equal(amount / 4);
                 expect(await erc20r.balanceOf(addr3.address)).to.equal(amount / 2);
 
-                //frozen1 should be amount / 2
-                //frozen2 shoudl be 1/3 * 1/2 * amount 
-                //frozen3 should be 2/3 * 1/2 * amount 
+                //frozen1 should be 100
+                //frozen2 shoudl be 0 
+                //frozen3 should be 100
 
                 await freeze;
                 await ensureMine(manualMine);
@@ -315,9 +313,9 @@ describe("ERC20R", function () {
                 const frozen2 = await erc20r.frozen(addr2.address);
                 const frozen3 = await erc20r.frozen(addr3.address);
 
-                expect(frozen1).to.equal(amount / 2);
-                expect(frozen2).to.equal(Math.floor(amount / 6));
-                expect(frozen3).to.equal(Math.floor(amount / 3));
+                expect(frozen1).to.equal(100);
+                expect(frozen2).to.equal(0);
+                expect(frozen3).to.equal(100);
             });
 
             it("Reverse works", async () => {
@@ -329,11 +327,11 @@ describe("ERC20R", function () {
                 await erc20r.reverse(claimID);
                 await ensureMine(manualMine);
 
-                const owedBy1 = amount / 2;
+                const owedBy1 = 100;
                 expect(await erc20r.balanceOf(addr1.address)).to.equal(0);
-                const owedBy2 = Math.floor(amount / 6);
+                const owedBy2 = 0;
                 expect(await erc20r.balanceOf(addr2.address)).to.equal(amount / 4 - owedBy2);
-                const owedBy3 = Math.floor(amount / 3);
+                const owedBy3 = 100;
                 expect(await erc20r.balanceOf(addr3.address)).to.equal(amount / 2 - owedBy3);
                 expect(await erc20r.balanceOf(owner.address)).to.equal(TOTAL_SUPPLY - amount / 4 - amount + owedBy1 + owedBy2 + owedBy3);
             })
@@ -350,7 +348,6 @@ describe("ERC20R", function () {
             });
         });
     }
-
     describe("Reasonable reversible period environment", function () {
         // `beforeEach` will run before each test, re-deploying the contract every
         // time. It receives a callback, which can be async.
@@ -459,31 +456,6 @@ describe("ERC20R", function () {
             await expect(erc20r.clean([owner.address, addr2.address], epoch)).to.be.revertedWith("ERC20R: addresses to clean for block Epoch does not match the actual data storage.");
         });
 
-    });
-
-    describe("Test topological sort", function () {
-        let epoch = 0;
-        let index = 0;
-
-        beforeEach(async function (){
-            ExampleERC20R = await ethers.getContractFactory("ExampleERC20R");
-            [owner, addr1, addr2, addr3] = await ethers.getSigners();
-            erc20r = await ExampleERC20R.deploy(TOTAL_SUPPLY, 360, owner.address);
-        });
-
-        it("Child comes after parent.", async function () {
-            await erc20r.transfer(addr1.address, 100);
-            await erc20r.transfer(addr2.address, 100);
-            await erc20r.connect(addr2).transfer(addr1.address, 50);
-
-            await erc20r._getTopologicalOrder(epoch, owner.address, index);
-            const orderedSuspects = (await erc20r.queryFilter('OrderedSuspectsFilled'))[0].args.orderedSuspects;
-            expect(orderedSuspects.length).to.equal(3);
-            expect(orderedSuspects[0]).to.equal(owner.address);
-            expect(orderedSuspects[1]).to.equal(addr2.address);
-            expect(orderedSuspects[2]).to.equal(addr1.address);
-            
-        });
     });
 
 });
