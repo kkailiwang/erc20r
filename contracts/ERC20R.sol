@@ -576,7 +576,7 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         }
     }
 
-    /* Assumes no cycles in spenditures for now
+    /* Assumes no cycles in spenditures for now.
      * Can only be called by governance contract.
      * Called if judges approve the freeze request.
      */
@@ -615,7 +615,9 @@ contract ERC20R is Context, IERC20, IERC20Metadata {
         for (uint256 addrIndex = t.susPos; addrIndex > 0; --addrIndex) {
             address addr = t.orderedSuspects[addrIndex - 1];
 
-            uint256 toFreeze = oblig.get(addr).min(_balances[addr]);
+            uint256 toFreeze = oblig.get(addr).min(
+                _balances[addr] - frozen[addr] //amount available to freeze in balance.
+            );
 
             frozen[addr] += toFreeze;
             if (toFreeze > 0)
